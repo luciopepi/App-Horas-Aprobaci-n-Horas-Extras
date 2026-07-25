@@ -47,6 +47,49 @@ const ROLES_VALIDOS = ['Supervisor', 'Jefe', 'RRHH'];
 const CACHE_KEY_DIRECTORIO = 'directorio_correos';
 const CACHE_TTL_DIRECTORIO = 300; // segundos
 
+// ==================== NORMALIZACION ====================
+/**
+ * Normaliza un email para comparar y para usar como clave de mapa:
+ * sin espacios y en minuscula. Usar SIEMPRE que se compare un email o
+ * se use un email como clave (saldoSupervisor, tablaSaldos, _directorio,
+ * validarCompensacion, rolDe, nombreDe). Sin esto, "Juan.Perez@x.com" y
+ * "juan.perez@x.com" son dos personas distintas para el sistema.
+ */
+function _normEmail(x) {
+  return String(x || '').trim().toLowerCase();
+}
+
+/**
+ * Normaliza un rol a su forma canonica (Supervisor/Jefe/RRHH), sin
+ * importar mayusculas/minusculas. La validacion de datos de Sheets es
+ * case-insensitive, asi que "jefe" tipeado a mano tiene que matchear
+ * igual que "Jefe".
+ */
+function _normRol(x) {
+  const r = String(x || '').trim().toLowerCase();
+  if (r === 'jefe') return 'Jefe';
+  if (r === 'rrhh') return 'RRHH';
+  if (r === 'supervisor') return 'Supervisor';
+  return '';
+}
+
+/**
+ * Detecta emails placeholder de ejemplo (dominios reservados por RFC 2606
+ * que nunca deben resolver ni recibir correo real). Sirve para que el
+ * sistema nunca mande el token de aprobacion a la fila de ejemplo si
+ * alguien la deja con Activo=SI por error.
+ */
+function _esEmailPlaceholder(email) {
+  const dominio = _normEmail(email).split('@')[1] || '';
+  return dominio === 'invalid' || dominio === 'example' ||
+         dominio.endsWith('.invalid') || dominio.endsWith('.example');
+}
+
+/** Genera un ID corto extra para evitar colisiones entre altas en el mismo segundo. */
+function _sufijoId() {
+  return Utilities.getUuid().slice(0, 4);
+}
+
 // ============================ SETUP ============================
 function setup() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -91,8 +134,14 @@ function _ensureHojaCorreos(ss) {
   sh.getRange(2, colActivo, filas, 1).setDataValidation(reglaActivo);
 
   if (esNueva) {
-    // Fila de ejemplo con placeholders: reemplazar por los datos reales.
-    sh.appendRow(['jefe@ejemplo.com', 'M. Rivas', 'Jefe', '', 'SI']);
+    // Fila de ejemplo con placeholder INVALIDO a proposito (dominio .invalid,
+    // reservado por RFC 2606: nunca resuelve ni recibe correo) y Activo=NO.
+    // Un dominio "de ejemplo" comun sin reservar es en realidad registrable:
+    // si alguien dejaba ese placeholder sin reemplazar y Activo=SI, el
+    // sistema le mandaba el nombre del supervisor, las horas, el motivo y
+    // el LINK CON TOKEN VALIDO a un tercero. Reemplazar esta fila por el
+    // correo real del Jefe y poner Activo=SI.
+    sh.appendRow(['REEMPLAZAR@invalid', 'M. Rivas', 'Jefe', '', 'NO']);
   }
 }
 
@@ -131,15 +180,18 @@ function _directorio() {
     if (!fila[cEmail]) continue;
     if (String(fila[cActivo]).trim().toUpperCase() !== 'SI') continue;
     directorio.push({
-      email:  String(fila[cEmail]).trim(),
+      email:  _normEmail(fila[cEmail]),
       nombre: String(fila[cNombre]).trim(),
-      rol:    String(fila[cRol]).trim(),
+      rol:    _normRol(fila[cRol]),
       linea:  String(fila[cLinea]).trim(),
       activo: 'SI'
     });
   }
 
-  if (cache) {
+  // No cachear un directorio vacio: si alguien deja todas las filas en
+  // Activo=NO por error y despues lo corrige, no queremos que el sistema
+  // siga "roto" hasta 5 minutos despues por un [] cacheado de mas.
+  if (cache && directorio.length > 0) {
     try {
       cache.put(CACHE_KEY_DIRECTORIO, JSON.stringify(directorio), CACHE_TTL_DIRECTORIO);
     } catch (err) {
@@ -176,25 +228,30 @@ function invalidarCacheDirectorio() {
 
 function jefeEmail() {
   const jefe = _directorio().find(p => p.rol === 'Jefe');
-  if (!jefe) throw new Error('No hay ningun Jefe activo cargado en la hoja "Correos".');
+  if (!jefe || _esEmailPlaceholder(jefe.email)) {
+    throw new Error('Completa la hoja "Correos" con el correo real del Jefe (rol Jefe, Activo=SI).');
+  }
   return jefe.email;
 }
 
 function rrhhEmails() {
-  return _directorio().filter(p => p.rol === 'RRHH').map(p => p.email).join(',');
+  return _directorio()
+    .filter(p => p.rol === 'RRHH' && !_esEmailPlaceholder(p.email))
+    .map(p => p.email)
+    .join(',');
 }
 
 function rolDe(email) {
-  if (!email) return null;
-  const buscado = String(email).trim().toLowerCase();
-  const persona = _directorio().find(p => p.email.trim().toLowerCase() === buscado);
+  const buscado = _normEmail(email);
+  if (!buscado) return null;
+  const persona = _directorio().find(p => p.email === buscado);
   return persona ? persona.rol : null;
 }
 
 function nombreDe(email) {
-  if (!email) return '';
-  const buscado = String(email).trim().toLowerCase();
-  const persona = _directorio().find(p => p.email.trim().toLowerCase() === buscado);
+  const buscado = _normEmail(email);
+  if (!buscado) return '';
+  const persona = _directorio().find(p => p.email === buscado);
   return persona ? persona.nombre : email;
 }
 
@@ -220,7 +277,7 @@ function onFormSubmitHE(e) {
 function _altaHorasExtra(get) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sh = ss.getSheetByName(SH.SOL);
-  const id = 'HE-' + Utilities.formatDate(new Date(), CONFIG.TZ, 'yyMMdd-HHmmss');
+  const id = 'HE-' + Utilities.formatDate(new Date(), CONFIG.TZ, 'yyMMdd-HHmmss') + '-' + _sufijoId();
   const token = Utilities.getUuid();
 
   const supervisor = get('Supervisor') || get('Nombre');
@@ -230,32 +287,44 @@ function _altaHorasExtra(get) {
   const linea      = get('Linea') || get('Sector');
   const motivo     = get('Motivo');
 
+  // Resolver el destinatario ANTES de escribir la fila: si no hay Jefe
+  // configurado en la hoja "Correos", mejor que falle aca (nada se guarda)
+  // a que quede una solicitud huerfana: escrita pero sin nadie que la
+  // pueda ver ni aprobar.
+  const destinatarioJefe = jefeEmail();
+
   sh.appendRow([id, new Date(), supervisor, email, fechaHE, horas, linea, motivo,
                 'Pendiente', '', '', '', token]);
 
   _log(id, 'ALTA_HE', email, horas + ' hs - ' + fechaHE);
 
-  MailApp.sendEmail({
-    to: jefeEmail(),
-    subject: '[HE Pendiente] ' + supervisor + ' - ' + horas + ' hs - ' + fechaHE,
-    htmlBody: _mailAprobacion({
-      titulo: 'Solicitud de Horas Extra',
-      id: id, token: token, tipo: 'HE',
-      filas: [
-        ['Supervisor', supervisor],
-        ['Fecha HE', fechaHE],
-        ['Horas', horas],
-        ['Linea / Sector', linea],
-        ['Motivo', motivo]
-      ]
-    })
-  });
+  try {
+    MailApp.sendEmail({
+      to: destinatarioJefe,
+      subject: '[HE Pendiente] ' + supervisor + ' - ' + horas + ' hs - ' + fechaHE,
+      htmlBody: _mailAprobacion({
+        titulo: 'Solicitud de Horas Extra',
+        id: id, token: token, tipo: 'HE',
+        filas: [
+          ['Supervisor', supervisor],
+          ['Fecha HE', fechaHE],
+          ['Horas', horas],
+          ['Linea / Sector', linea],
+          ['Motivo', motivo]
+        ]
+      })
+    });
+  } catch (err) {
+    // La fila ya quedo guardada (arriba). Si el mail falla (cuota, etc.)
+    // dejamos traza en Auditoria en vez de perder la solicitud en silencio.
+    _log(id, 'ERROR_MAIL', email, 'No se pudo notificar al Jefe: ' + err.message);
+  }
 }
 
 function _altaCompensacion(get) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sh = ss.getSheetByName(SH.COMP);
-  const id = 'CP-' + Utilities.formatDate(new Date(), CONFIG.TZ, 'yyMMdd-HHmmss');
+  const id = 'CP-' + Utilities.formatDate(new Date(), CONFIG.TZ, 'yyMMdd-HHmmss') + '-' + _sufijoId();
   const token = Utilities.getUuid();
 
   const supervisor = get('Supervisor') || get('Nombre');
@@ -268,55 +337,60 @@ function _altaCompensacion(get) {
 
   const validacion = validarCompensacion(email, horas);
 
-  if (!validacion.ok) {
-    // Saldo insuficiente: se bloquea, no queda Pendiente ni puede aprobarse.
-    sh.appendRow([id, new Date(), supervisor, email, fecha, horas, tipo,
-                  'Rechazada', 'Sistema', new Date(),
-                  'Auto-rechazada: ' + validacion.mensaje, token]);
+  // Resolver el destinatario ANTES de escribir la fila (ver _altaHorasExtra).
+  const destinatarioJefe = jefeEmail();
 
-    _log(id, 'ALTA_COMP_AUTORECHAZO', email, horas + ' hs - ' + fecha);
-
-    MailApp.sendEmail({
-      to: email,
-      cc: rrhhEmails(),
-      subject: '[Compensacion Rechazada] ' + supervisor + ' - ' + fecha,
-      htmlBody:
-        '<p>Hola ' + supervisor + ',</p>' +
-        '<p>Tu solicitud de compensacion del <b>' + fecha + '</b> (' + horas +
-        ' hs) fue <b>rechazada automaticamente</b> por saldo insuficiente.</p>' +
-        '<p>' + validacion.mensaje + '</p>' +
-        '<p style="font-size:11px;color:#777">' + CONFIG.NOMBRE_PLANTA + '</p>'
-    });
-    return;
-  }
+  // IMPORTANTE (decision del director): el saldo insuficiente NO bloquea el
+  // alta. La solicitud se guarda igual como Pendiente, con una alerta bien
+  // visible en el mail para que el Jefe decida con criterio (por ejemplo,
+  // adelantar un descanso a cuenta de horas futuras). Auto-rechazar le
+  // sacaba la discrecion al Jefe y, combinado con un email mal escrito,
+  // podia destruir solicitudes validas sin vuelta atras. El bloqueo
+  // reversible (que SI corresponde) lo hace validarCompensacion() en el
+  // submit de la futura WebApp, antes de que la solicitud llegue a existir.
+  const alerta = !validacion.ok
+    ? '<p style="background:#B00020;color:#fff;font-weight:bold;padding:10px 14px;' +
+      'border-radius:4px;margin-bottom:16px">ATENCION: saldo insuficiente ' +
+      '(saldo actual: ' + validacion.saldo.toFixed(1) + ' hs, solicitado ' +
+      horas.toFixed(1) + ' hs). La solicitud quedo guardada igual como ' +
+      'Pendiente: vos decidis si se aprueba.</p>'
+    : '';
 
   sh.appendRow([id, new Date(), supervisor, email, fecha, horas, tipo,
                 'Pendiente', '', '', '', token]);
 
-  _log(id, 'ALTA_COMP', email, horas + ' hs - ' + fecha);
+  _log(id, 'ALTA_COMP', email, horas + ' hs - ' + fecha + (validacion.ok ? '' : ' [SALDO INSUFICIENTE]'));
 
-  MailApp.sendEmail({
-    to: jefeEmail(),
-    subject: '[Compensacion Pendiente] ' + supervisor + ' - ' + fecha,
-    htmlBody: _mailAprobacion({
-      titulo: 'Solicitud de Compensacion',
-      id: id, token: token, tipo: 'CP',
-      filas: [
-        ['Supervisor', supervisor],
-        ['Fecha solicitada', fecha],
-        ['Tipo', tipo],
-        ['Horas a descontar', horas],
-        ['Saldo disponible', validacion.saldo.toFixed(1) + ' hs']
-      ]
-    })
-  });
+  try {
+    MailApp.sendEmail({
+      to: destinatarioJefe,
+      subject: (validacion.ok ? '' : '[SALDO INSUFICIENTE] ') + '[Compensacion Pendiente] ' + supervisor + ' - ' + fecha,
+      htmlBody: alerta + _mailAprobacion({
+        titulo: 'Solicitud de Compensacion',
+        id: id, token: token, tipo: 'CP',
+        filas: [
+          ['Supervisor', supervisor],
+          ['Fecha solicitada', fecha],
+          ['Tipo', tipo],
+          ['Horas a descontar', horas],
+          ['Saldo disponible', validacion.saldo.toFixed(1) + ' hs']
+        ]
+      })
+    });
+  } catch (err) {
+    _log(id, 'ERROR_MAIL', email, 'No se pudo notificar al Jefe: ' + err.message);
+  }
 }
 
 // ==================== VALIDACION DE SALDO ====================
 /**
  * Fuente de verdad unica para saber si una compensacion se puede otorgar.
- * La usan tanto el alta por formulario (_altaCompensacion) como, a futuro,
- * la WebApp propia.
+ * En el alta por formulario (_altaCompensacion) es solo INFORMATIVA: si no
+ * alcanza el saldo, la solicitud queda Pendiente igual con una alerta, y
+ * el Jefe decide (ver comentario en _altaCompensacion). El BLOQUEO real y
+ * reversible va en el submit de la futura WebApp propia, antes de que la
+ * solicitud llegue a crearse. doGet tambien la usa para avisarle al Jefe
+ * si el saldo cambio entre el alta y el momento de aprobar.
  */
 function validarCompensacion(email, horas) {
   const saldo = saldoSupervisor(email);
@@ -367,6 +441,10 @@ function doGet(e) {
     const cEmail  = _idx(enc, 'Email');
     const cHoras  = _idx(enc, esComp ? 'Horas a compensar' : 'Horas');
 
+    if (p.accion !== 'aprobar' && p.accion !== 'rechazar') {
+      return _html('Accion invalida.', '#B00020');
+    }
+
     for (let i = 1; i < data.length; i++) {
       if (data[i][0] !== p.id) continue;
       if (String(data[i][cTok]) !== p.token) return _html('Token invalido.', '#B00020');
@@ -375,16 +453,43 @@ function doGet(e) {
 
       const estado = (p.accion === 'aprobar') ? 'Aprobada' : 'Rechazada';
 
+      // Quien esta actuando. Si Google no informa un usuario (normal cuando
+      // el Jefe abre el link del mail en el celular sin sesion de
+      // Workspace activa), no le atribuimos la accion a nadie en concreto.
+      // Si SI informa un usuario, tiene que figurar como Jefe en la hoja
+      // "Correos" para poder aprobar o rechazar.
+      let quien = Session.getActiveUser().getEmail();
+      if (quien) {
+        if (rolDe(quien) !== 'Jefe') {
+          return _html('Tu cuenta (' + quien + ') no tiene permiso de Jefe para aprobar o rechazar solicitudes.', '#B00020');
+        }
+      } else {
+        quien = 'Desconocido (via token)';
+      }
+
+      // Compensaciones: si el saldo ya no alcanza (pudo cambiar desde el
+      // alta), no rechazamos solo: le pedimos al Jefe que confirme la
+      // aprobacion a sabiendas, con un segundo click.
+      let saldoNegativoConfirmado = false;
       if (esComp && estado === 'Aprobada') {
         const validacion = validarCompensacion(data[i][cEmail], parseFloat(data[i][cHoras]) || 0);
         if (!validacion.ok) {
-          return _html('No se puede aprobar: ' + validacion.mensaje, '#B00020');
+          if (p.confirmar !== '1') {
+            const urlConfirmar = CONFIG.WEBAPP_URL + '?id=' + encodeURIComponent(p.id) +
+              '&token=' + encodeURIComponent(p.token) + '&accion=aprobar&confirmar=1';
+            return HtmlService.createHtmlOutput(
+              '<div style="font-family:Arial,sans-serif;text-align:center;padding:48px 24px;max-width:480px;margin:0 auto">' +
+              '<p style="font-size:18px;color:#B00020;font-weight:bold">Saldo insuficiente</p>' +
+              '<p style="font-size:15px;color:#333">' + validacion.mensaje + '</p>' +
+              '<p style="font-size:14px;color:#666">Si de todos modos queres aprobarla, confirma la aprobacion:</p>' +
+              '<p><a href="' + urlConfirmar + '" style="background:#B00020;color:#fff;padding:12px 28px;' +
+              'text-decoration:none;border-radius:4px;font-weight:bold">APROBAR IGUAL</a></p>' +
+              '<p style="font-size:12px;color:#999">Si no confirmas, la solicitud sigue Pendiente sin cambios.</p>' +
+              '</div>'
+            ).addMetaTag('viewport', 'width=device-width, initial-scale=1');
+          }
+          saldoNegativoConfirmado = true;
         }
-      }
-
-      let quien = Session.getActiveUser().getEmail();
-      if (!quien) {
-        try { quien = jefeEmail(); } catch (err) { quien = 'Jefe'; }
       }
 
       sh.getRange(i + 1, cEst + 1).setValue(estado);
@@ -392,7 +497,10 @@ function doGet(e) {
       sh.getRange(i + 1, cFec + 1).setValue(new Date());
 
       _log(p.id, estado.toUpperCase(), quien, '');
-      _notificarResultado(data[i], estado, esComp);
+      if (saldoNegativoConfirmado) {
+        _log(p.id, 'APROBADA_SALDO_NEGATIVO', quien, 'Aprobada con saldo insuficiente, confirmado explicitamente por el Jefe.');
+      }
+      _notificarResultado(data[i], estado, esComp, enc);
 
       return _html('Solicitud ' + p.id + ' <b>' + estado + '</b>.',
                    estado === 'Aprobada' ? '#1B7F4B' : '#B00020');
@@ -403,8 +511,13 @@ function doGet(e) {
   }
 }
 
-function _notificarResultado(fila, estado, esComp) {
-  const supervisor = fila[2], email = fila[3], fecha = fila[4], horas = fila[5];
+function _notificarResultado(fila, estado, esComp, enc) {
+  const cSupervisor = _idx(enc, 'Supervisor');
+  const cEmail      = _idx(enc, 'Email');
+  const cFecha      = _idx(enc, esComp ? 'Fecha solicitada' : 'Fecha HE');
+  const cHoras      = _idx(enc, esComp ? 'Horas a compensar' : 'Horas');
+
+  const supervisor = fila[cSupervisor], email = fila[cEmail], fecha = fila[cFecha], horas = fila[cHoras];
   const asunto = (esComp ? '[Compensacion ' : '[Horas Extra ') + estado + '] ' + fecha;
   const cuerpo =
     '<p>Hola ' + supervisor + ',</p>' +
@@ -413,12 +526,16 @@ function _notificarResultado(fila, estado, esComp) {
     '<p>Saldo actual de horas extra: <b>' + saldoSupervisor(email).toFixed(1) + ' hs</b>.</p>' +
     '<p style="font-size:11px;color:#777">' + CONFIG.NOMBRE_PLANTA + '</p>';
 
-  MailApp.sendEmail({ to: email, cc: rrhhEmails(), subject: asunto, htmlBody: cuerpo });
+  const opciones = { to: email, subject: asunto, htmlBody: cuerpo };
+  const cc = rrhhEmails();
+  if (cc) opciones.cc = cc;
+  MailApp.sendEmail(opciones);
 }
 
 // ==================== SALDOS ====================
 function saldoSupervisor(email) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const buscado = _normEmail(email);
   let saldo = 0;
   const acum = (hoja, signo) => {
     const d = ss.getSheetByName(hoja).getDataRange().getValues();
@@ -428,7 +545,7 @@ function saldoSupervisor(email) {
     const cEstado = _idx(enc, 'Estado');
     const cHoras  = _idx(enc, hoja === SH.SOL ? 'Horas' : 'Horas a compensar');
     for (let i = 1; i < d.length; i++)
-      if (d[i][cEmail] === email && d[i][cEstado] === 'Aprobada')
+      if (_normEmail(d[i][cEmail]) === buscado && d[i][cEstado] === 'Aprobada')
         saldo += signo * (parseFloat(d[i][cHoras]) || 0);
   };
   acum(SH.SOL, 1);
@@ -449,7 +566,8 @@ function tablaSaldos() {
     const cHoras  = _idx(enc, hoja === SH.SOL ? 'Horas' : 'Horas a compensar');
     for (let i = 1; i < d.length; i++) {
       if (d[i][cEstado] !== 'Aprobada') continue;
-      const k = d[i][cEmail];
+      const k = _normEmail(d[i][cEmail]);
+      if (!k) continue;
       if (!map[k]) map[k] = { nombre: d[i][cNombre], generadas: 0, compensadas: 0 };
       if (signo > 0) map[k].generadas   += parseFloat(d[i][cHoras]) || 0;
       else           map[k].compensadas += parseFloat(d[i][cHoras]) || 0;
@@ -516,11 +634,10 @@ function resumenMensual() {
     (pend ? '<p style="color:#B00020">Solicitudes pendientes de aprobacion: ' + pend + '</p>' : '') +
     '</div>';
 
-  MailApp.sendEmail({
-    to: jefeEmail(), cc: rrhhEmails(),
-    subject: 'Resumen mensual de Horas Extra - ' + per,
-    htmlBody: html
-  });
+  const opciones = { to: jefeEmail(), subject: 'Resumen mensual de Horas Extra - ' + per, htmlBody: html };
+  const cc = rrhhEmails();
+  if (cc) opciones.cc = cc;
+  MailApp.sendEmail(opciones);
 }
 
 // ==================== AUXILIARES ====================

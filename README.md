@@ -50,6 +50,7 @@ Sistema para que los **supervisores** carguen sus horas extra y días de compens
 - `Activo`: `SI` | `NO` (con validación de datos en la celda).
 - Tiene que haber **al menos un Jefe activo** cargado para que el sistema pueda notificar y aprobar.
 - El script lee esta hoja a través de `_directorio()`, con cache de 5 minutos (`CacheService`). Si editás la hoja y necesitás que el cambio se vea al toque, corré manualmente `invalidarCacheDirectorio()` desde el editor de Apps Script.
+- `setup()` deja una fila de ejemplo con `Activo = NO` y el email `REEMPLAZAR@invalid` (dominio `.invalid`, reservado por RFC 2606: nunca resuelve ni recibe correo real). Reemplazá esa fila por el Jefe real y poné `Activo = SI`. `jefeEmail()` rechaza explícitamente cualquier correo con dominio `.invalid` o `.example`, así que el sistema no puede quedar "funcionando" con el placeholder puesto por error.
 
 > **IMPORTANTE — privacidad:** los correos reales de la empresa **no van en el repositorio ni en el código**, en ningún archivo, comentario o dato de ejemplo. Se cargan a mano en la hoja `Correos` del Google Sheet, que vive solo en la cuenta de Google Workspace de la empresa. Cualquier ejemplo en el código o la documentación usa placeholders (`@ejemplo.com`) y nombres genéricos.
 

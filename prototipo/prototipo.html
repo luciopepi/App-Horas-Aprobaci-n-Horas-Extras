@@ -1,3 +1,5 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Control de Horas Extra · Graffigna</title>
 <style>
   /* ==================== RESET BASICO ==================== */
@@ -38,7 +40,10 @@
     --bg-c: #1A1013;
     --text-1: #F8F2EB;
     --text-2: #D9C6BC;
-    --text-muted: #B9A79D;
+    /* --text-muted: aclarado para dar >=4.5:1 incluso sobre el rincon
+       mas calido del fondo (radial de app-shell a alpha completo + glass);
+       ver docs de contraste en el reporte del refactor. */
+    --text-muted: #E6DAD3;
     --glass-bg: rgba(255,255,255,0.07);
     --glass-border: rgba(255,255,255,0.16);
     --glass-shadow: 0 1px 0 rgba(255,255,255,.12) inset, 0 10px 30px -10px rgba(0,0,0,.55);
@@ -51,6 +56,22 @@
     --chip-ok-text: #8CE6B4;
     --chip-err-bg: rgba(176,0,32,0.24);
     --chip-err-text: #FFA8B5;
+    /* --error-text / --ok-text: version del rojo/verde semantico apta para
+       TEXTO (no fondo/borde). --error y --ok solos no cumplen AA como texto. */
+    --error-text: #FFD6DA;
+    --ok-text: #BEEAD3;
+    /* --num-grad-*: extremos del degrade del numero de saldo (hero, 56px).
+       Separados de --vspt-oro/--vspt-cobre porque esos tokens no se
+       retematizan y en claro quedaban invisibles sobre la tarjeta. */
+    --num-grad-a: #E3B85F;
+    --num-grad-b: #E6A97E;
+    /* --saldo-glow: brillo bordo decorativo detras del numero de saldo. */
+    --saldo-glow: rgba(123,34,51,0.30);
+    /* --bg-radial-*: manchas de fondo del app-shell, retematizadas para
+       no ensuciar el modo claro (ver B6). */
+    --bg-radial-1: rgba(184,92,56,0.55);
+    --bg-radial-2: rgba(123,34,51,0.60);
+    --bg-radial-3: rgba(90,24,38,0.55);
     --blob-1: var(--vspt-bordo);
     --blob-2: var(--vspt-terracota);
     --blob-3: var(--vspt-oro);
@@ -66,7 +87,7 @@
       --bg-c: #EFE3D2;
       --text-1: #2A1014;
       --text-2: #5B3B37;
-      --text-muted: #7A5A54;
+      --text-muted: #583733;
       --glass-bg: rgba(255,255,255,0.62);
       --glass-border: rgba(255,255,255,0.75);
       --glass-shadow: 0 1px 0 rgba(255,255,255,.65) inset, 0 10px 30px -10px rgba(90,24,38,.28);
@@ -79,6 +100,14 @@
       --chip-ok-text: #0E5C34;
       --chip-err-bg: rgba(176,0,32,0.14);
       --chip-err-text: #8A0018;
+      --error-text: #800018;
+      --ok-text: #0C4527;
+      --num-grad-a: #5A1826;
+      --num-grad-b: #8C3F22;
+      --saldo-glow: rgba(123,34,51,0.12);
+      --bg-radial-1: rgba(184,92,56,0.18);
+      --bg-radial-2: rgba(123,34,51,0.16);
+      --bg-radial-3: rgba(90,24,38,0.10);
       --focus-ring: #7B2233;
       --divider: rgba(90,24,38,0.12);
     }
@@ -87,7 +116,7 @@
   :root[data-theme="dark"] {
     color-scheme: dark;
     --bg-a: #33141a; --bg-b: #4a1c22; --bg-c: #1A1013;
-    --text-1: #F8F2EB; --text-2: #D9C6BC; --text-muted: #B9A79D;
+    --text-1: #F8F2EB; --text-2: #D9C6BC; --text-muted: #E6DAD3;
     --glass-bg: rgba(255,255,255,0.07); --glass-border: rgba(255,255,255,0.16);
     --glass-shadow: 0 1px 0 rgba(255,255,255,.12) inset, 0 10px 30px -10px rgba(0,0,0,.55);
     --surface-solid: rgba(20,12,14,0.55);
@@ -95,13 +124,17 @@
     --chip-pend-bg: rgba(217,164,65,0.20); --chip-pend-text: #F6DFA1;
     --chip-ok-bg: rgba(27,127,75,0.24); --chip-ok-text: #8CE6B4;
     --chip-err-bg: rgba(176,0,32,0.24); --chip-err-text: #FFA8B5;
+    --error-text: #FFD6DA; --ok-text: #BEEAD3;
+    --num-grad-a: #E3B85F; --num-grad-b: #E6A97E;
+    --saldo-glow: rgba(123,34,51,0.30);
+    --bg-radial-1: rgba(184,92,56,0.55); --bg-radial-2: rgba(123,34,51,0.60); --bg-radial-3: rgba(90,24,38,0.55);
     --focus-ring: #F0C674;
     --divider: rgba(255,255,255,0.10);
   }
   :root[data-theme="light"] {
     color-scheme: light;
     --bg-a: #F7EEE1; --bg-b: #F0DAC3; --bg-c: #EFE3D2;
-    --text-1: #2A1014; --text-2: #5B3B37; --text-muted: #7A5A54;
+    --text-1: #2A1014; --text-2: #5B3B37; --text-muted: #583733;
     --glass-bg: rgba(255,255,255,0.62); --glass-border: rgba(255,255,255,0.75);
     --glass-shadow: 0 1px 0 rgba(255,255,255,.65) inset, 0 10px 30px -10px rgba(90,24,38,.28);
     --surface-solid: rgba(255,255,255,0.72);
@@ -109,6 +142,10 @@
     --chip-pend-bg: rgba(217,164,65,0.26); --chip-pend-text: #6E4B04;
     --chip-ok-bg: rgba(27,127,75,0.16); --chip-ok-text: #0E5C34;
     --chip-err-bg: rgba(176,0,32,0.14); --chip-err-text: #8A0018;
+    --error-text: #800018; --ok-text: #0C4527;
+    --num-grad-a: #5A1826; --num-grad-b: #8C3F22;
+    --saldo-glow: rgba(123,34,51,0.12);
+    --bg-radial-1: rgba(184,92,56,0.18); --bg-radial-2: rgba(123,34,51,0.16); --bg-radial-3: rgba(90,24,38,0.10);
     --focus-ring: #7B2233;
     --divider: rgba(90,24,38,0.12);
   }
@@ -125,9 +162,9 @@
     min-height: 100vh;
     isolation: isolate;
     background:
-      radial-gradient(60% 50% at 15% 0%, rgba(184,92,56,0.55), transparent 60%),
-      radial-gradient(70% 60% at 100% 10%, rgba(123,34,51,0.60), transparent 65%),
-      radial-gradient(90% 70% at 50% 100%, rgba(90,24,38,0.55), transparent 70%),
+      radial-gradient(60% 50% at 15% 0%, var(--bg-radial-1), transparent 60%),
+      radial-gradient(70% 60% at 100% 10%, var(--bg-radial-2), transparent 65%),
+      radial-gradient(90% 70% at 50% 100%, var(--bg-radial-3), transparent 70%),
       linear-gradient(160deg, var(--bg-a), var(--bg-b) 55%, var(--bg-c) 100%);
   }
   .blobs { position: absolute; inset: 0; overflow: hidden; z-index: -1; pointer-events: none; }
@@ -255,7 +292,7 @@
     text-align: center;
     margin-bottom: 16px;
     background:
-      linear-gradient(155deg, color-mix(in srgb, var(--vspt-bordo) 30%, transparent), transparent 60%),
+      linear-gradient(155deg, var(--saldo-glow), transparent 60%),
       var(--glass-bg);
   }
   .saldo-label { font-size: 13px; color: var(--text-2); font-weight: 600; letter-spacing: .3px; text-transform: uppercase; }
@@ -270,7 +307,7 @@
     font-size: 56px;
     font-weight: 800;
     line-height: 1;
-    background: linear-gradient(135deg, var(--vspt-oro), var(--vspt-cobre));
+    background: linear-gradient(135deg, var(--num-grad-a), var(--num-grad-b));
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
@@ -326,13 +363,14 @@
     color: var(--text-1);
   }
   .btn-approve {
-    background: linear-gradient(135deg, var(--ok), #2FA968);
+    /* extremo claro oscurecido a #1A8049: blanco encima da 4.97:1 (antes 3.00:1 con #2FA968) */
+    background: linear-gradient(135deg, var(--ok), #1A8049);
     color: #fff;
   }
   .btn-reject {
     background: var(--input-bg);
     border: 1px solid var(--error);
-    color: var(--error);
+    color: var(--error-text);
   }
   .btn:disabled, .btn[aria-disabled="true"] {
     opacity: .45;
@@ -590,7 +628,7 @@
   .calc-row b { color: var(--text-1); font-variant-numeric: tabular-nums; }
   .calc-result { padding-top: 8px; border-top: 1px solid var(--divider); font-weight: 700; }
   .calc-box.invalid { border-color: var(--error); }
-  .calc-box.invalid .calc-result b { color: var(--error); }
+  .calc-box.invalid .calc-result b { color: var(--error-text); }
 
   .check-demo {
     flex-direction: row !important;
@@ -607,7 +645,7 @@
     gap: 8px;
     font-size: 13px;
     font-weight: 600;
-    color: var(--error);
+    color: var(--error-text);
     background: var(--chip-err-bg);
     border-radius: 10px;
     padding: 10px 12px;
@@ -709,7 +747,7 @@
     <div class="blob blob-3"></div>
   </div>
 
-  <div class="container">
+  <div class="container" id="appContainer">
 
     <header class="topbar glass">
       <div class="brand">
@@ -918,9 +956,9 @@
       { tipo: 'HE', titulo: '3,0 hs · Falla en linea', fecha: '02/07/2026', linea: 'L3', chip: 'rechazada' }
     ],
     pendientes: [
-      { nombre: 'M. Rivas', fecha: '21/07/2026', horas: '6,0 hs', linea: 'L2', motivo: 'Cierre de lote para despacho de exportacion.' },
-      { nombre: 'G. Sosa', fecha: '20/07/2026', horas: '3,5 hs', linea: 'L1', motivo: 'Reprogramacion de arranque por cambio de formato.' },
-      { nombre: 'D. Quiroga', fecha: '19/07/2026', horas: '8,0 hs', linea: 'L3', motivo: 'Cobertura de turno por ausentismo.' }
+      { id: 'p1', nombre: 'M. Rivas', fecha: '21/07/2026', horas: '6,0 hs', linea: 'L2', motivo: 'Cierre de lote para despacho de exportacion.' },
+      { id: 'p2', nombre: 'G. Sosa', fecha: '20/07/2026', horas: '3,5 hs', linea: 'L1', motivo: 'Reprogramacion de arranque por cambio de formato.' },
+      { id: 'p3', nombre: 'D. Quiroga', fecha: '19/07/2026', horas: '8,0 hs', linea: 'L3', motivo: 'Cobertura de turno por ausentismo.' }
     ],
     equipo: [
       { nombre: 'M. Rivas', delMes: 18.0, saldo: 26.5, pct: 74 },
@@ -933,6 +971,16 @@
   var fmt = function (n) {
     return (Math.round(n * 10) / 10).toFixed(1).replace('.', ',');
   };
+
+  // Escapa texto antes de insertarlo con innerHTML. Este prototipo es la
+  // base de la WebApp real: el "Motivo" lo escribe el supervisor y se
+  // termina mostrando en la pantalla del Jefe, asi que nunca hay que
+  // volcarlo crudo en el HTML.
+  var _escDiv = document.createElement('div');
+  function esc(valor) {
+    _escDiv.textContent = valor == null ? '' : String(valor);
+    return _escDiv.innerHTML;
+  }
 
   /* ==================== TEMA ==================== */
   var root = document.documentElement;
@@ -1021,8 +1069,8 @@
       var info = chipInfo(s.chip);
       li.innerHTML =
         '<div class="sol-main">' +
-          '<span class="sol-tipo">' + s.tipo + '</span>' +
-          '<div class="sol-info"><strong>' + s.titulo + '</strong><span class="sol-meta">' + s.fecha + (s.linea && s.linea !== '-' ? ' · ' + s.linea : '') + '</span></div>' +
+          '<span class="sol-tipo">' + esc(s.tipo) + '</span>' +
+          '<div class="sol-info"><strong>' + esc(s.titulo) + '</strong><span class="sol-meta">' + esc(s.fecha) + (s.linea && s.linea !== '-' ? ' · ' + esc(s.linea) : '') + '</span></div>' +
         '</div>' +
         '<span class="chip ' + info.clase + '">' + info.texto + '</span>';
       listaSolicitudes.appendChild(li);
@@ -1043,19 +1091,19 @@
       var li = document.createElement('li');
       li.className = 'pendiente-card glass';
       li.style.setProperty('--i', i);
-      li.dataset.idx = i;
+      li.dataset.id = p.id;
       li.innerHTML =
         '<div class="approved-flash">' +
           '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg>' +
           'Aprobada' +
         '</div>' +
-        '<div class="pend-top"><strong>' + p.nombre + '</strong><span class="chip chip-pendiente">Pendiente</span></div>' +
+        '<div class="pend-top"><strong>' + esc(p.nombre) + '</strong><span class="chip chip-pendiente">Pendiente</span></div>' +
         '<dl class="pend-grid">' +
-          '<div><dt>Fecha</dt><dd>' + p.fecha + '</dd></div>' +
-          '<div><dt>Horas</dt><dd class="num">' + p.horas + '</dd></div>' +
-          '<div><dt>Linea</dt><dd>' + p.linea + '</dd></div>' +
+          '<div><dt>Fecha</dt><dd>' + esc(p.fecha) + '</dd></div>' +
+          '<div><dt>Horas</dt><dd class="num">' + esc(p.horas) + '</dd></div>' +
+          '<div><dt>Linea</dt><dd>' + esc(p.linea) + '</dd></div>' +
         '</dl>' +
-        '<p class="pend-motivo">' + p.motivo + '</p>' +
+        '<p class="pend-motivo">' + esc(p.motivo) + '</p>' +
         '<div class="pend-actions">' +
           '<button type="button" class="btn btn-reject" data-action="rechazar">Rechazar</button>' +
           '<button type="button" class="btn btn-approve" data-action="aprobar">Aprobar</button>' +
@@ -1069,7 +1117,7 @@
     var btn = ev.target.closest('button[data-action]');
     if (!btn) return;
     var card = btn.closest('.pendiente-card');
-    var idx = Number(card.dataset.idx);
+    var id = card.dataset.id;
     var accion = btn.getAttribute('data-action');
 
     card.querySelectorAll('button').forEach(function (b) { b.disabled = true; });
@@ -1082,7 +1130,11 @@
     setTimeout(function () {
       card.classList.add('leaving');
       setTimeout(function () {
-        estado.pendientes.splice(idx, 1);
+        // Buscamos el indice ACTUAL por id justo antes de splicear (no el
+        // indice capturado al clickear), porque para entonces la lista
+        // pudo haberse vuelto a renderizar por otro click en paralelo.
+        var idxActual = estado.pendientes.findIndex(function (p) { return p.id === id; });
+        if (idxActual !== -1) estado.pendientes.splice(idxActual, 1);
         renderPendientes();
       }, 340);
     }, accion === 'aprobar' ? 420 : 60);
@@ -1098,7 +1150,7 @@
       li.className = 'equipo-item';
       li.style.setProperty('--i', i);
       li.innerHTML =
-        '<div class="equipo-info"><strong>' + p.nombre + '</strong><span>HE del mes: <span class="num">' + fmt(p.delMes) + '</span> hs</span></div>' +
+        '<div class="equipo-info"><strong>' + esc(p.nombre) + '</strong><span>HE del mes: <span class="num">' + fmt(p.delMes) + '</span> hs</span></div>' +
         '<div class="equipo-bar-track"><div class="equipo-bar" style="--pct:' + p.pct + '%"></div></div>' +
         '<span class="equipo-saldo num">' + fmt(p.saldo) + ' hs</span>';
       listaEquipo.appendChild(li);
@@ -1106,15 +1158,58 @@
   }
 
   /* ==================== MODALES ==================== */
+  var appContainer = document.getElementById('appContainer');
+  var focoAntesDelModal = null;
+
+  function elementosFocosables(root) {
+    var selector = 'a[href], button:not([disabled]), input:not([disabled]), ' +
+      'select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+    return Array.prototype.filter.call(root.querySelectorAll(selector), function (el) {
+      return el.offsetParent !== null;
+    });
+  }
+
+  function atraparTab(overlay) {
+    return function (ev) {
+      if (ev.key !== 'Tab') return;
+      var focosables = elementosFocosables(overlay);
+      if (!focosables.length) return;
+      var primero = focosables[0];
+      var ultimo = focosables[focosables.length - 1];
+      if (ev.shiftKey && document.activeElement === primero) {
+        ev.preventDefault();
+        ultimo.focus();
+      } else if (!ev.shiftKey && document.activeElement === ultimo) {
+        ev.preventDefault();
+        primero.focus();
+      }
+    };
+  }
+
   function abrirModal(overlay) {
+    focoAntesDelModal = document.activeElement;
+    if ('inert' in appContainer) appContainer.inert = true;
+    else appContainer.setAttribute('aria-hidden', 'true');
     overlay.setAttribute('aria-hidden', 'false');
     overlay.classList.add('open');
     var focoInicial = overlay.querySelector('input, select, textarea, button');
     if (focoInicial) setTimeout(function () { focoInicial.focus(); }, 40);
+    overlay._trapHandler = atraparTab(overlay);
+    overlay.addEventListener('keydown', overlay._trapHandler);
   }
   function cerrarModal(overlay) {
     overlay.classList.remove('open');
     overlay.setAttribute('aria-hidden', 'true');
+    if (overlay._trapHandler) {
+      overlay.removeEventListener('keydown', overlay._trapHandler);
+      overlay._trapHandler = null;
+    }
+    if ('inert' in appContainer) appContainer.inert = false;
+    else appContainer.removeAttribute('aria-hidden');
+    if (focoAntesDelModal && typeof focoAntesDelModal.focus === 'function') {
+      focoAntesDelModal.focus();
+    }
+    focoAntesDelModal = null;
   }
 
   document.querySelectorAll('.modal-overlay').forEach(function (overlay) {

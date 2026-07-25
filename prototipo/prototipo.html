@@ -1,0 +1,1251 @@
+<title>Control de Horas Extra · Graffigna</title>
+<style>
+  /* ==================== RESET BASICO ==================== */
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; min-height: 100%;
+    overflow-x: hidden;
+  }
+  ul { list-style: none; margin: 0; padding: 0; }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  h1, h2, h3, p, dl, dd, dt, fieldset { margin: 0; padding: 0; border: 0; }
+  svg { display: block; }
+
+  /* ==================== TOKENS DE DISEÑO ==================== */
+  :root {
+    color-scheme: dark;
+    --vspt-bordo: #7B2233;
+    --vspt-bordo-profundo: #5A1826;
+    --vspt-terracota: #B85C38;
+    --vspt-cobre: #C2703D;
+    --vspt-oro: #D9A441;
+    --vspt-crema: #F2EDE4;
+    --vspt-tinta: #1A1013;
+    --ok: #1B7F4B;
+    --error: #B00020;
+    --pendiente: #D9A441;
+
+    --radio-card: 20px;
+    --radio-btn: 14px;
+    --radio-modal: 26px;
+
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+
+    /* variantes de tema (oscuro por defecto) */
+    --bg-a: #33141a;
+    --bg-b: #4a1c22;
+    --bg-c: #1A1013;
+    --text-1: #F8F2EB;
+    --text-2: #D9C6BC;
+    --text-muted: #B9A79D;
+    --glass-bg: rgba(255,255,255,0.07);
+    --glass-border: rgba(255,255,255,0.16);
+    --glass-shadow: 0 1px 0 rgba(255,255,255,.12) inset, 0 10px 30px -10px rgba(0,0,0,.55);
+    --surface-solid: rgba(20,12,14,0.55);
+    --input-bg: rgba(255,255,255,0.07);
+    --input-border: rgba(255,255,255,0.24);
+    --chip-pend-bg: rgba(217,164,65,0.20);
+    --chip-pend-text: #F6DFA1;
+    --chip-ok-bg: rgba(27,127,75,0.24);
+    --chip-ok-text: #8CE6B4;
+    --chip-err-bg: rgba(176,0,32,0.24);
+    --chip-err-text: #FFA8B5;
+    --blob-1: var(--vspt-bordo);
+    --blob-2: var(--vspt-terracota);
+    --blob-3: var(--vspt-oro);
+    --focus-ring: #F0C674;
+    --divider: rgba(255,255,255,0.10);
+  }
+
+  @media (prefers-color-scheme: light) {
+    :root {
+      color-scheme: light;
+      --bg-a: #F7EEE1;
+      --bg-b: #F0DAC3;
+      --bg-c: #EFE3D2;
+      --text-1: #2A1014;
+      --text-2: #5B3B37;
+      --text-muted: #7A5A54;
+      --glass-bg: rgba(255,255,255,0.62);
+      --glass-border: rgba(255,255,255,0.75);
+      --glass-shadow: 0 1px 0 rgba(255,255,255,.65) inset, 0 10px 30px -10px rgba(90,24,38,.28);
+      --surface-solid: rgba(255,255,255,0.72);
+      --input-bg: rgba(255,255,255,0.75);
+      --input-border: rgba(90,24,38,0.20);
+      --chip-pend-bg: rgba(217,164,65,0.26);
+      --chip-pend-text: #6E4B04;
+      --chip-ok-bg: rgba(27,127,75,0.16);
+      --chip-ok-text: #0E5C34;
+      --chip-err-bg: rgba(176,0,32,0.14);
+      --chip-err-text: #8A0018;
+      --focus-ring: #7B2233;
+      --divider: rgba(90,24,38,0.12);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg-a: #33141a; --bg-b: #4a1c22; --bg-c: #1A1013;
+    --text-1: #F8F2EB; --text-2: #D9C6BC; --text-muted: #B9A79D;
+    --glass-bg: rgba(255,255,255,0.07); --glass-border: rgba(255,255,255,0.16);
+    --glass-shadow: 0 1px 0 rgba(255,255,255,.12) inset, 0 10px 30px -10px rgba(0,0,0,.55);
+    --surface-solid: rgba(20,12,14,0.55);
+    --input-bg: rgba(255,255,255,0.07); --input-border: rgba(255,255,255,0.24);
+    --chip-pend-bg: rgba(217,164,65,0.20); --chip-pend-text: #F6DFA1;
+    --chip-ok-bg: rgba(27,127,75,0.24); --chip-ok-text: #8CE6B4;
+    --chip-err-bg: rgba(176,0,32,0.24); --chip-err-text: #FFA8B5;
+    --focus-ring: #F0C674;
+    --divider: rgba(255,255,255,0.10);
+  }
+  :root[data-theme="light"] {
+    color-scheme: light;
+    --bg-a: #F7EEE1; --bg-b: #F0DAC3; --bg-c: #EFE3D2;
+    --text-1: #2A1014; --text-2: #5B3B37; --text-muted: #7A5A54;
+    --glass-bg: rgba(255,255,255,0.62); --glass-border: rgba(255,255,255,0.75);
+    --glass-shadow: 0 1px 0 rgba(255,255,255,.65) inset, 0 10px 30px -10px rgba(90,24,38,.28);
+    --surface-solid: rgba(255,255,255,0.72);
+    --input-bg: rgba(255,255,255,0.75); --input-border: rgba(90,24,38,0.20);
+    --chip-pend-bg: rgba(217,164,65,0.26); --chip-pend-text: #6E4B04;
+    --chip-ok-bg: rgba(27,127,75,0.16); --chip-ok-text: #0E5C34;
+    --chip-err-bg: rgba(176,0,32,0.14); --chip-err-text: #8A0018;
+    --focus-ring: #7B2233;
+    --divider: rgba(90,24,38,0.12);
+  }
+
+  body {
+    font-family: var(--font-sans);
+    color: var(--text-1);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ==================== FONDO ==================== */
+  .app-shell {
+    position: relative;
+    min-height: 100vh;
+    isolation: isolate;
+    background:
+      radial-gradient(60% 50% at 15% 0%, rgba(184,92,56,0.55), transparent 60%),
+      radial-gradient(70% 60% at 100% 10%, rgba(123,34,51,0.60), transparent 65%),
+      radial-gradient(90% 70% at 50% 100%, rgba(90,24,38,0.55), transparent 70%),
+      linear-gradient(160deg, var(--bg-a), var(--bg-b) 55%, var(--bg-c) 100%);
+  }
+  .blobs { position: absolute; inset: 0; overflow: hidden; z-index: -1; pointer-events: none; }
+  .blob {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(70px);
+    opacity: .55;
+    will-change: transform;
+  }
+  .blob-1 { width: 320px; height: 320px; left: -80px; top: -60px; background: var(--blob-1); animation: driftA 26s ease-in-out infinite alternate; }
+  .blob-2 { width: 280px; height: 280px; right: -70px; top: 30%; background: var(--blob-2); animation: driftB 32s ease-in-out infinite alternate; }
+  .blob-3 { width: 260px; height: 260px; left: 10%; bottom: -90px; background: var(--blob-3); opacity: .35; animation: driftC 38s ease-in-out infinite alternate; }
+
+  @keyframes driftA { from { transform: translate(0,0) scale(1); } to { transform: translate(40px, 30px) scale(1.12); } }
+  @keyframes driftB { from { transform: translate(0,0) scale(1); } to { transform: translate(-30px, 40px) scale(1.08); } }
+  @keyframes driftC { from { transform: translate(0,0) scale(1); } to { transform: translate(25px, -25px) scale(1.15); } }
+
+  /* ==================== LAYOUT ==================== */
+  .container {
+    max-width: 480px;
+    margin: 0 auto;
+    padding: 16px 16px 64px;
+  }
+  @media (min-width: 860px) {
+    .container { max-width: 920px; padding: 28px 32px 96px; }
+  }
+
+  /* ==================== GLASS ==================== */
+  .glass {
+    background: var(--glass-bg);
+    -webkit-backdrop-filter: blur(20px) saturate(140%);
+    backdrop-filter: blur(20px) saturate(140%);
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--glass-shadow);
+  }
+  .card {
+    border-radius: var(--radio-card);
+    padding: 20px;
+  }
+
+  /* ==================== HEADER ==================== */
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 14px 16px;
+    border-radius: var(--radio-card);
+    margin-bottom: 18px;
+    flex-wrap: wrap;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .condor-logo { flex-shrink: 0; }
+  .brand-text { display: flex; flex-direction: column; min-width: 0; }
+  .brand-text strong { font-size: 15px; letter-spacing: .2px; white-space: nowrap; }
+  .brand-text span { font-size: 12px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .topbar-actions { display: flex; align-items: center; gap: 10px; }
+
+  .role-switch {
+    display: inline-flex;
+    padding: 3px;
+    border-radius: 999px;
+    background: var(--input-bg);
+    border: 1px solid var(--input-border);
+  }
+  .role-btn {
+    border: 0;
+    background: transparent;
+    color: var(--text-2);
+    padding: 8px 14px;
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 600;
+    min-height: 36px;
+    transition: background .18s ease, color .18s ease, transform .12s ease;
+  }
+  .role-btn.active {
+    background: linear-gradient(135deg, var(--vspt-bordo), var(--vspt-terracota));
+    color: #fff;
+  }
+  .role-btn:hover { transform: translateY(-1px); }
+  .role-btn:active { transform: translateY(0); }
+
+  .theme-toggle {
+    width: 40px; height: 40px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--input-bg);
+    border: 1px solid var(--input-border);
+    color: var(--text-1);
+    transition: transform .15s ease, background .15s ease;
+    flex-shrink: 0;
+  }
+  .theme-toggle:hover { transform: translateY(-1px) rotate(-8deg); }
+  .theme-toggle svg { width: 18px; height: 18px; }
+
+  /* Foco visible accesible */
+  a:focus-visible, button:focus-visible, input:focus-visible,
+  select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+    border-radius: 8px;
+  }
+
+  /* ==================== VISTAS ==================== */
+  .view { display: none; }
+  .view.active { display: block; animation: viewIn .28s ease both; }
+  @keyframes viewIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+
+  .section-title {
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: .2px;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .muted { color: var(--text-muted); font-weight: 400; }
+
+  /* ==================== SALDO CARD ==================== */
+  .saldo-card {
+    text-align: center;
+    margin-bottom: 16px;
+    background:
+      linear-gradient(155deg, color-mix(in srgb, var(--vspt-bordo) 30%, transparent), transparent 60%),
+      var(--glass-bg);
+  }
+  .saldo-label { font-size: 13px; color: var(--text-2); font-weight: 600; letter-spacing: .3px; text-transform: uppercase; }
+  .saldo-number {
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    gap: 8px;
+    margin: 10px 0 16px;
+  }
+  .saldo-number .num {
+    font-size: 56px;
+    font-weight: 800;
+    line-height: 1;
+    background: linear-gradient(135deg, var(--vspt-oro), var(--vspt-cobre));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    font-variant-numeric: tabular-nums;
+  }
+  .saldo-unit { font-size: 18px; font-weight: 700; color: var(--text-2); }
+  .saldo-breakdown {
+    display: flex;
+    justify-content: center;
+    gap: 20px;
+    flex-wrap: wrap;
+    font-size: 13px;
+    color: var(--text-2);
+    padding-top: 14px;
+    border-top: 1px solid var(--divider);
+  }
+  .saldo-breakdown b { color: var(--text-1); font-variant-numeric: tabular-nums; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; margin-right: 6px; vertical-align: middle; }
+  .dot-gen { background: var(--vspt-oro); }
+  .dot-comp { background: var(--vspt-terracota); }
+
+  /* ==================== BOTONES ==================== */
+  .btn {
+    border-radius: var(--radio-btn);
+    padding: 13px 18px;
+    font-weight: 700;
+    font-size: 14px;
+    border: 1px solid transparent;
+    min-height: 48px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    transition: transform .12s ease, filter .15s ease, box-shadow .15s ease;
+  }
+  .btn svg { width: 18px; height: 18px; flex-shrink: 0; }
+  .btn:hover { filter: brightness(1.08); transform: translateY(-1px); }
+  .btn:active { transform: translateY(0); filter: brightness(.97); }
+
+  .btn-primary {
+    background: linear-gradient(135deg, var(--vspt-bordo), var(--vspt-terracota));
+    color: #fff;
+    box-shadow: 0 8px 20px -8px rgba(123,34,51,0.70);
+  }
+  .btn-secondary {
+    background: linear-gradient(135deg, var(--vspt-cobre), var(--vspt-oro));
+    color: #2A1014;
+    box-shadow: 0 8px 20px -8px rgba(217,164,65,0.60);
+  }
+  .btn-ghost {
+    background: var(--input-bg);
+    border: 1px solid var(--input-border);
+    color: var(--text-1);
+  }
+  .btn-approve {
+    background: linear-gradient(135deg, var(--ok), #2FA968);
+    color: #fff;
+  }
+  .btn-reject {
+    background: var(--input-bg);
+    border: 1px solid var(--error);
+    color: var(--error);
+  }
+  .btn:disabled, .btn[aria-disabled="true"] {
+    opacity: .45;
+    cursor: not-allowed;
+    filter: none;
+    transform: none;
+  }
+
+  .actions-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+  @media (max-width: 420px) {
+    .actions-row { grid-template-columns: 1fr; }
+  }
+
+  /* ==================== LISTAS / CHIPS ==================== */
+  .chip {
+    font-size: 12px;
+    font-weight: 700;
+    padding: 5px 11px;
+    border-radius: 999px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .chip-pendiente { background: var(--chip-pend-bg); color: var(--chip-pend-text); }
+  .chip-aprobada  { background: var(--chip-ok-bg); color: var(--chip-ok-text); }
+  .chip-rechazada { background: var(--chip-err-bg); color: var(--chip-err-text); }
+
+  .list-card { margin-bottom: 16px; }
+  .solicitudes-list li,
+  .pendientes-list > li {
+    opacity: 0;
+    animation: itemIn .42s cubic-bezier(.16,1,.3,1) both;
+    animation-delay: calc(var(--i, 0) * 60ms);
+  }
+  @keyframes itemIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+  .solicitud-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 4px;
+    border-bottom: 1px solid var(--divider);
+  }
+  .solicitud-item:last-child { border-bottom: 0; }
+  .sol-main { display: flex; align-items: center; gap: 12px; min-width: 0; }
+  .sol-tipo {
+    width: 36px; height: 36px;
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 800;
+    background: var(--input-bg);
+    border: 1px solid var(--input-border);
+    flex-shrink: 0;
+  }
+  .sol-info { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
+  .sol-info strong { font-size: 14px; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sol-meta { font-size: 12px; color: var(--text-muted); }
+
+  /* ==================== VISTA JEFE ==================== */
+  .jefe-header-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  .badge-count {
+    background: var(--vspt-oro);
+    color: #2A1014;
+    font-size: 12px;
+    font-weight: 800;
+    padding: 2px 9px;
+    border-radius: 999px;
+    margin-left: 4px;
+  }
+
+  .pendientes-list { display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px; }
+  .pendiente-card {
+    border-radius: var(--radio-card);
+    padding: 16px;
+    position: relative;
+    overflow: hidden;
+    transition: opacity .32s ease, transform .32s ease, max-height .32s ease, margin .32s ease, padding .32s ease;
+  }
+  .pendiente-card.leaving {
+    opacity: 0;
+    transform: translateX(40px) scale(.97);
+    max-height: 0;
+    margin: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    pointer-events: none;
+  }
+  .pend-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; gap: 8px; }
+  .pend-top strong { font-size: 15px; }
+  .pend-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+  .pend-grid dt { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .3px; margin-bottom: 2px; }
+  .pend-grid dd { font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .pend-motivo { font-size: 13px; color: var(--text-2); margin-bottom: 14px; line-height: 1.45; }
+  .pend-actions { display: flex; gap: 10px; }
+  .pend-actions .btn { flex: 1; min-height: 44px; padding: 10px 14px; }
+
+  .approved-flash {
+    position: absolute;
+    inset: 0;
+    background: rgba(27,127,75,0.90);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    color: #fff;
+    font-weight: 800;
+    font-size: 14px;
+    opacity: 0;
+    border-radius: var(--radio-card);
+  }
+  .approved-flash.show { animation: flashIn .5s ease both; }
+  @keyframes flashIn { 0% { opacity: 0; } 15% { opacity: 1; } 85% { opacity: 1; } 100% { opacity: 0; } }
+  .approved-flash svg { width: 22px; height: 22px; }
+
+  .equipo-card { margin-bottom: 12px; }
+  .equipo-list { display: flex; flex-direction: column; gap: 14px; }
+  .equipo-item { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; align-items: center; }
+  .equipo-info { display: flex; flex-direction: column; gap: 2px; grid-column: 1 / 2; }
+  .equipo-info strong { font-size: 14px; }
+  .equipo-info span { font-size: 12px; color: var(--text-muted); }
+  .equipo-saldo { grid-column: 2 / 3; grid-row: 1 / 3; font-weight: 800; font-size: 15px; font-variant-numeric: tabular-nums; }
+  .equipo-bar-track {
+    grid-column: 1 / 2;
+    height: 6px;
+    border-radius: 999px;
+    background: var(--input-bg);
+    border: 1px solid var(--input-border);
+    overflow: hidden;
+  }
+  .equipo-bar {
+    height: 100%;
+    width: var(--pct, 0%);
+    border-radius: 999px;
+    background: linear-gradient(90deg, var(--vspt-oro), var(--vspt-terracota));
+    animation: barIn 900ms cubic-bezier(.16,1,.3,1) both;
+    animation-delay: calc(var(--i, 0) * 60ms + 120ms);
+  }
+  @keyframes barIn { from { width: 0; } to { width: var(--pct, 0%); } }
+
+  @media (min-width: 860px) {
+    .jefe-grid { display: grid; grid-template-columns: 1.3fr 1fr; gap: 20px; align-items: start; }
+  }
+
+  /* ==================== MODALES ==================== */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(26,16,19,0.55);
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    padding: 0;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 180ms ease, visibility 0s linear 200ms;
+    z-index: 50;
+  }
+  @media (min-width: 640px) {
+    .modal-overlay { align-items: center; padding: 24px; }
+  }
+  .modal-overlay.open {
+    opacity: 1;
+    visibility: visible;
+    transition: opacity 180ms ease;
+  }
+  .modal {
+    width: 100%;
+    max-width: 480px;
+    max-height: 92vh;
+    overflow-y: auto;
+    border-radius: var(--radio-modal) var(--radio-modal) 0 0;
+    padding: 22px 22px 18px;
+    transform: scale(.94) translateY(24px);
+    opacity: 0;
+    transition: transform 320ms cubic-bezier(0.16, 1, 0.3, 1), opacity 320ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  @media (min-width: 640px) {
+    .modal { border-radius: var(--radio-modal); transform: scale(.94) translateY(12px); }
+  }
+  .modal-overlay.open .modal { transform: scale(1) translateY(0); opacity: 1; }
+  .modal-overlay:not(.open) .modal { transition: transform 200ms ease, opacity 200ms ease; }
+
+  .modal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+  .modal-header h2 { font-size: 18px; font-weight: 800; }
+  .modal-close {
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    border: 1px solid var(--input-border);
+    background: var(--input-bg);
+    font-size: 18px;
+    line-height: 1;
+    display: flex; align-items: center; justify-content: center;
+  }
+
+  .modal-body { display: flex; flex-direction: column; gap: 14px; }
+  .modal-body label {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-2);
+  }
+  .modal-body input[type="text"],
+  .modal-body input[type="date"],
+  .modal-body input[type="number"],
+  .modal-body select,
+  .modal-body textarea {
+    background: var(--input-bg);
+    border: 1px solid var(--input-border);
+    border-radius: 12px;
+    padding: 12px 14px;
+    color: var(--text-1);
+    font-size: 15px;
+    min-height: 46px;
+  }
+  .modal-body textarea { resize: vertical; min-height: 80px; font-family: inherit; }
+
+  .tipo-fieldset { display: flex; flex-direction: column; gap: 8px; }
+  .tipo-fieldset legend { font-size: 13px; font-weight: 600; color: var(--text-2); margin-bottom: 2px; padding: 0; }
+  .radio {
+    flex-direction: row !important;
+    align-items: center;
+    gap: 10px !important;
+    background: var(--input-bg);
+    border: 1px solid var(--input-border);
+    border-radius: 12px;
+    padding: 12px 14px;
+    font-weight: 500 !important;
+    color: var(--text-1) !important;
+    min-height: 44px;
+  }
+  .radio input { width: 18px; height: 18px; accent-color: var(--vspt-terracota); }
+
+  .calc-box {
+    background: var(--surface-solid);
+    border: 1px solid var(--input-border);
+    border-radius: 14px;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .calc-row { display: flex; justify-content: space-between; font-size: 13px; color: var(--text-2); }
+  .calc-row b { color: var(--text-1); font-variant-numeric: tabular-nums; }
+  .calc-result { padding-top: 8px; border-top: 1px solid var(--divider); font-weight: 700; }
+  .calc-box.invalid { border-color: var(--error); }
+  .calc-box.invalid .calc-result b { color: var(--error); }
+
+  .check-demo {
+    flex-direction: row !important;
+    align-items: center;
+    gap: 8px !important;
+    font-size: 12px !important;
+    color: var(--text-muted) !important;
+  }
+  .check-demo input { width: 16px; height: 16px; }
+
+  .error-msg {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--error);
+    background: var(--chip-err-bg);
+    border-radius: 10px;
+    padding: 10px 12px;
+  }
+  .error-msg[hidden] { display: none; }
+
+  .modal-footer {
+    display: flex;
+    gap: 10px;
+    margin-top: 18px;
+  }
+  .modal-footer .btn { flex: 1; }
+
+  /* ==================== ANIMACION DE EXITO ==================== */
+  .success-overlay { z-index: 60; }
+  .success-panel {
+    border-radius: var(--radio-modal);
+    padding: 34px 30px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+    max-width: 300px;
+    transform: scale(.94) translateY(12px);
+    opacity: 0;
+    transition: transform 320ms cubic-bezier(0.16, 1, 0.3, 1), opacity 320ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .success-overlay.open .success-panel { transform: scale(1) translateY(0); opacity: 1; }
+  .success-text { font-size: 15px; font-weight: 700; text-align: center; }
+
+  .success-ring {
+    fill: none;
+    stroke: var(--ok);
+    stroke-width: 5;
+    stroke-linecap: round;
+    stroke-dasharray: 264;
+    stroke-dashoffset: 264;
+    transform-origin: center;
+  }
+  .success-check {
+    fill: none;
+    stroke: var(--ok);
+    stroke-width: 7;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-dasharray: 70;
+    stroke-dashoffset: 70;
+  }
+  .success-ripple {
+    fill: none;
+    stroke: var(--ok);
+    stroke-width: 2;
+    opacity: 0;
+    transform-origin: center;
+  }
+  .success-overlay.open .success-ring {
+    animation: ringDraw 520ms ease-out 60ms forwards;
+  }
+  .success-overlay.open .success-check {
+    animation: checkDraw 420ms ease-out 420ms forwards;
+  }
+  .success-overlay.open .success-ripple {
+    animation: rippleOut 700ms ease-out 380ms forwards;
+  }
+  @keyframes ringDraw { to { stroke-dashoffset: 0; } }
+  @keyframes checkDraw { to { stroke-dashoffset: 0; } }
+  @keyframes rippleOut { 0% { opacity: .6; transform: scale(.7); } 100% { opacity: 0; transform: scale(1.35); } }
+
+  /* ==================== FOOTER / VARIOS ==================== */
+  .foot-note {
+    text-align: center;
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 24px;
+  }
+
+  .visually-hidden {
+    position: absolute; width: 1px; height: 1px;
+    overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap;
+  }
+
+  /* ==================== REDUCED MOTION ==================== */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+      scroll-behavior: auto !important;
+    }
+    .blob { animation: none !important; }
+    .role-btn:hover, .theme-toggle:hover, .btn:hover { transform: none !important; }
+  }
+</style>
+
+<div class="app-shell">
+  <div class="blobs" aria-hidden="true">
+    <div class="blob blob-1"></div>
+    <div class="blob blob-2"></div>
+    <div class="blob blob-3"></div>
+  </div>
+
+  <div class="container">
+
+    <header class="topbar glass">
+      <div class="brand">
+        <svg class="condor-logo" width="38" height="38" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Isotipo condor">
+          <defs>
+            <linearGradient id="condorGrad" x1="2" y1="10" x2="62" y2="54" gradientUnits="userSpaceOnUse">
+              <stop offset="0" stop-color="#D9A441"/>
+              <stop offset="1" stop-color="#B85C38"/>
+            </linearGradient>
+          </defs>
+          <path fill="url(#condorGrad)" d="M32 30.5
+            C 27 19, 14 11, 3 15
+            C 6 19.5, 12.5 21.5, 17.5 27
+            C 11 28.5, 4.5 34.5, 3.5 43
+            C 10.5 40.5, 18 37.5, 23.5 32.5
+            C 25.5 37, 28 42.5, 30 50
+            C 30.7 44.5, 31.4 38, 32 33.5
+            C 32.6 38, 33.3 44.5, 34 50
+            C 36 42.5, 38.5 37, 40.5 32.5
+            C 46 37.5, 53.5 40.5, 60.5 43
+            C 59.5 34.5, 53 28.5, 46.5 27
+            C 51.5 21.5, 58 19.5, 61 15
+            C 50 11, 37 19, 32 30.5 Z"/>
+          <circle cx="32" cy="27.5" r="2.6" fill="url(#condorGrad)"/>
+        </svg>
+        <div class="brand-text">
+          <strong>Control de Horas Extra</strong>
+          <span>Planta Graffigna · Fraccionamiento</span>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <div class="role-switch" role="tablist" aria-label="Elegir rol">
+          <button type="button" class="role-btn active" data-role="supervisor" role="tab" aria-selected="true">Supervisor</button>
+          <button type="button" class="role-btn" data-role="jefe" role="tab" aria-selected="false">Jefe</button>
+        </div>
+        <button type="button" class="theme-toggle" id="themeToggle" aria-label="Cambiar a modo claro">
+          <svg id="iconMoon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>
+          <svg id="iconSun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" hidden>
+            <circle cx="12" cy="12" r="4"/>
+            <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- ==================== VISTA SUPERVISOR ==================== -->
+    <section id="viewSupervisor" class="view active" aria-labelledby="tituloSupervisor">
+      <h1 id="tituloSupervisor" class="visually-hidden">Vista supervisor</h1>
+
+      <section class="card saldo-card glass">
+        <div class="saldo-label">Tu saldo disponible</div>
+        <div class="saldo-number">
+          <span class="num" id="saldoNumber">0,0</span>
+          <span class="saldo-unit">hs</span>
+        </div>
+        <div class="saldo-breakdown">
+          <span><span class="dot dot-gen"></span>Generadas <b class="num" id="saldoGeneradas">0,0</b> hs</span>
+          <span><span class="dot dot-comp"></span>Compensadas <b class="num" id="saldoCompensadas">0,0</b> hs</span>
+        </div>
+      </section>
+
+      <div class="actions-row">
+        <button type="button" class="btn btn-primary" id="btnAbrirHE">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l3 2M9 2h6"/></svg>
+          Cargar horas extra
+        </button>
+        <button type="button" class="btn btn-secondary" id="btnAbrirComp">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18M8 3v4M16 3v4"/><path d="m9 15 2 2 4-4"/></svg>
+          Pedir compensacion
+        </button>
+      </div>
+
+      <section class="card list-card glass">
+        <h2 class="section-title">Mis solicitudes</h2>
+        <ul class="solicitudes-list" id="listaSolicitudes"><!-- items via JS --></ul>
+      </section>
+
+      <p class="foot-note">VSPT Wine Group · Planta Graffigna · San Juan, Argentina</p>
+    </section>
+
+    <!-- ==================== VISTA JEFE ==================== -->
+    <section id="viewJefe" class="view" aria-labelledby="tituloJefe">
+      <h1 id="tituloJefe" class="visually-hidden">Vista jefe</h1>
+
+      <div class="jefe-grid">
+        <div>
+          <div class="jefe-header-row">
+            <h2 class="section-title">Pendientes <span class="badge-count" id="pendCount">0</span></h2>
+          </div>
+          <ul class="pendientes-list" id="listaPendientes"><!-- items via JS --></ul>
+        </div>
+
+        <section class="card equipo-card glass">
+          <h2 class="section-title">Saldos del equipo</h2>
+          <ul class="equipo-list" id="listaEquipo"><!-- items via JS --></ul>
+        </section>
+      </div>
+
+      <p class="foot-note">VSPT Wine Group · Planta Graffigna · San Juan, Argentina</p>
+    </section>
+
+  </div>
+
+  <!-- ==================== MODAL: CARGAR HORAS EXTRA ==================== -->
+  <div class="modal-overlay" id="overlayHE" aria-hidden="true">
+    <div class="modal glass" role="dialog" aria-modal="true" aria-labelledby="tituloModalHE">
+      <div class="modal-header">
+        <h2 id="tituloModalHE">Cargar horas extra</h2>
+        <button type="button" class="modal-close" data-close aria-label="Cerrar">&times;</button>
+      </div>
+      <form id="formHE" class="modal-body" novalidate>
+        <label>Fecha
+          <input type="date" name="fecha" required>
+        </label>
+        <label>Cantidad de horas
+          <input type="number" name="horas" step="0.5" min="0.5" max="12" placeholder="Ej: 3" required>
+        </label>
+        <label>Linea
+          <select name="linea" required>
+            <option value="">Elegir linea...</option>
+            <option value="L1">L1</option>
+            <option value="L2">L2</option>
+            <option value="L3">L3</option>
+          </select>
+        </label>
+        <label>Motivo
+          <textarea name="motivo" rows="3" placeholder="Ej: cierre de lote para despacho de exportacion" required></textarea>
+        </label>
+      </form>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-ghost" data-close>Cancelar</button>
+        <button type="submit" class="btn btn-primary" form="formHE">Enviar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== MODAL: PEDIR COMPENSACION ==================== -->
+  <div class="modal-overlay" id="overlayComp" aria-hidden="true">
+    <div class="modal glass" role="dialog" aria-modal="true" aria-labelledby="tituloModalComp">
+      <div class="modal-header">
+        <h2 id="tituloModalComp">Pedir compensacion</h2>
+        <button type="button" class="modal-close" data-close aria-label="Cerrar">&times;</button>
+      </div>
+      <form id="formComp" class="modal-body" novalidate>
+        <label>Fecha solicitada
+          <input type="date" name="fecha" required>
+        </label>
+        <fieldset class="tipo-fieldset">
+          <legend>Tipo</legend>
+          <label class="radio">
+            <input type="radio" name="tipo" value="completo" checked> Dia completo <span class="muted">(8 hs)</span>
+          </label>
+          <label class="radio">
+            <input type="radio" name="tipo" value="medio"> Medio dia <span class="muted">(4 hs)</span>
+          </label>
+        </fieldset>
+
+        <div class="calc-box" id="compCalcBox">
+          <div class="calc-row"><span>Horas a descontar</span><b class="num" id="compHorasDescontar">8,0 hs</b></div>
+          <div class="calc-row"><span>Saldo actual</span><b class="num" id="compSaldoActual">26,5 hs</b></div>
+          <div class="calc-row calc-result"><span>Saldo resultante</span><b class="num" id="compSaldoResultante">18,5 hs</b></div>
+        </div>
+
+        <label class="radio check-demo">
+          <input type="checkbox" id="demoInsuficiente"> Simular saldo insuficiente (demo)
+        </label>
+
+        <p class="error-msg" id="compError" role="alert" hidden>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>
+          Saldo insuficiente: no se puede solicitar mas horas que las disponibles.
+        </p>
+      </form>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-ghost" data-close>Cancelar</button>
+        <button type="submit" class="btn btn-primary" form="formComp" id="btnEnviarComp">Enviar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== EXITO ==================== -->
+  <div class="modal-overlay success-overlay" id="overlaySuccess" aria-hidden="true">
+    <div class="success-panel glass">
+      <svg width="96" height="96" viewBox="0 0 100 100" role="img" aria-label="Enviado con exito">
+        <circle class="success-ripple" cx="50" cy="50" r="42"/>
+        <circle class="success-ring" cx="50" cy="50" r="42"/>
+        <path class="success-check" d="M30 52 L44 66 L72 34"/>
+      </svg>
+      <p class="success-text" id="successText">Solicitud enviada</p>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  /* ==================== DATOS MOCK ==================== */
+  var estado = {
+    saldo: 26.5,
+    generadas: 42.5,
+    compensadas: 16.0,
+    solicitudes: [
+      { tipo: 'HE', titulo: '6,0 hs · Cierre de despacho', fecha: '18/07/2026', linea: 'L2', chip: 'aprobada' },
+      { tipo: 'CP', titulo: 'Compensacion · Dia completo', fecha: '15/07/2026', linea: '-', chip: 'aprobada' },
+      { tipo: 'HE', titulo: '4,0 hs · Cambio de formato', fecha: '10/07/2026', linea: 'L1', chip: 'pendiente' },
+      { tipo: 'HE', titulo: '3,0 hs · Falla en linea', fecha: '02/07/2026', linea: 'L3', chip: 'rechazada' }
+    ],
+    pendientes: [
+      { nombre: 'M. Rivas', fecha: '21/07/2026', horas: '6,0 hs', linea: 'L2', motivo: 'Cierre de lote para despacho de exportacion.' },
+      { nombre: 'G. Sosa', fecha: '20/07/2026', horas: '3,5 hs', linea: 'L1', motivo: 'Reprogramacion de arranque por cambio de formato.' },
+      { nombre: 'D. Quiroga', fecha: '19/07/2026', horas: '8,0 hs', linea: 'L3', motivo: 'Cobertura de turno por ausentismo.' }
+    ],
+    equipo: [
+      { nombre: 'M. Rivas', delMes: 18.0, saldo: 26.5, pct: 74 },
+      { nombre: 'G. Sosa', delMes: 12.5, saldo: 14.0, pct: 46 },
+      { nombre: 'D. Quiroga', delMes: 22.0, saldo: 31.0, pct: 88 },
+      { nombre: 'L. Funes', delMes: 6.0, saldo: 9.5, pct: 27 }
+    ]
+  };
+
+  var fmt = function (n) {
+    return (Math.round(n * 10) / 10).toFixed(1).replace('.', ',');
+  };
+
+  /* ==================== TEMA ==================== */
+  var root = document.documentElement;
+  var themeToggle = document.getElementById('themeToggle');
+  var iconMoon = document.getElementById('iconMoon');
+  var iconSun = document.getElementById('iconSun');
+
+  function temaActual() {
+    var explicito = root.getAttribute('data-theme');
+    if (explicito) return explicito;
+    return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  }
+
+  function aplicarIconoTema() {
+    var t = temaActual();
+    var esOscuro = t === 'dark';
+    iconMoon.hidden = !esOscuro;
+    iconSun.hidden = esOscuro;
+    themeToggle.setAttribute('aria-label', esOscuro ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro');
+  }
+
+  themeToggle.addEventListener('click', function () {
+    var nuevo = temaActual() === 'dark' ? 'light' : 'dark';
+    root.setAttribute('data-theme', nuevo);
+    try { localStorage.setItem('horasextra_tema', nuevo); } catch (err) { /* modo privado, no critico */ }
+    aplicarIconoTema();
+  });
+
+  (function initTema() {
+    var guardado = null;
+    try { guardado = localStorage.getItem('horasextra_tema'); } catch (err) { /* no critico */ }
+    if (guardado === 'dark' || guardado === 'light') root.setAttribute('data-theme', guardado);
+    aplicarIconoTema();
+  })();
+
+  /* ==================== ROLES ==================== */
+  var roleBtns = document.querySelectorAll('.role-btn');
+  var viewSupervisor = document.getElementById('viewSupervisor');
+  var viewJefe = document.getElementById('viewJefe');
+
+  function setRole(rol) {
+    roleBtns.forEach(function (b) {
+      var activo = b.getAttribute('data-role') === rol;
+      b.classList.toggle('active', activo);
+      b.setAttribute('aria-selected', activo ? 'true' : 'false');
+    });
+    viewSupervisor.classList.toggle('active', rol === 'supervisor');
+    viewJefe.classList.toggle('active', rol === 'jefe');
+  }
+
+  roleBtns.forEach(function (b) {
+    b.addEventListener('click', function () { setRole(b.getAttribute('data-role')); });
+  });
+
+  /* ==================== CONTADOR ANIMADO DE SALDO ==================== */
+  function animarNumero(el, destino, duracionMs) {
+    var inicio = 0;
+    var t0 = null;
+    function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
+    function paso(ts) {
+      if (t0 === null) t0 = ts;
+      var progreso = Math.min(1, (ts - t0) / duracionMs);
+      var valor = inicio + (destino - inicio) * easeOutCubic(progreso);
+      el.textContent = fmt(valor);
+      if (progreso < 1) requestAnimationFrame(paso);
+      else el.textContent = fmt(destino);
+    }
+    requestAnimationFrame(paso);
+  }
+
+  /* ==================== RENDER: MIS SOLICITUDES ==================== */
+  var listaSolicitudes = document.getElementById('listaSolicitudes');
+
+  function chipInfo(chip) {
+    if (chip === 'aprobada') return { clase: 'chip-aprobada', texto: 'Aprobada' };
+    if (chip === 'rechazada') return { clase: 'chip-rechazada', texto: 'Rechazada' };
+    return { clase: 'chip-pendiente', texto: 'Pendiente' };
+  }
+
+  function renderSolicitudes() {
+    listaSolicitudes.innerHTML = '';
+    estado.solicitudes.forEach(function (s, i) {
+      var li = document.createElement('li');
+      li.className = 'solicitud-item';
+      li.style.setProperty('--i', i);
+      var info = chipInfo(s.chip);
+      li.innerHTML =
+        '<div class="sol-main">' +
+          '<span class="sol-tipo">' + s.tipo + '</span>' +
+          '<div class="sol-info"><strong>' + s.titulo + '</strong><span class="sol-meta">' + s.fecha + (s.linea && s.linea !== '-' ? ' · ' + s.linea : '') + '</span></div>' +
+        '</div>' +
+        '<span class="chip ' + info.clase + '">' + info.texto + '</span>';
+      listaSolicitudes.appendChild(li);
+    });
+  }
+
+  /* ==================== RENDER: PENDIENTES (JEFE) ==================== */
+  var listaPendientes = document.getElementById('listaPendientes');
+  var pendCount = document.getElementById('pendCount');
+
+  function actualizarContadorPendientes() {
+    pendCount.textContent = estado.pendientes.length;
+  }
+
+  function renderPendientes() {
+    listaPendientes.innerHTML = '';
+    estado.pendientes.forEach(function (p, i) {
+      var li = document.createElement('li');
+      li.className = 'pendiente-card glass';
+      li.style.setProperty('--i', i);
+      li.dataset.idx = i;
+      li.innerHTML =
+        '<div class="approved-flash">' +
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg>' +
+          'Aprobada' +
+        '</div>' +
+        '<div class="pend-top"><strong>' + p.nombre + '</strong><span class="chip chip-pendiente">Pendiente</span></div>' +
+        '<dl class="pend-grid">' +
+          '<div><dt>Fecha</dt><dd>' + p.fecha + '</dd></div>' +
+          '<div><dt>Horas</dt><dd class="num">' + p.horas + '</dd></div>' +
+          '<div><dt>Linea</dt><dd>' + p.linea + '</dd></div>' +
+        '</dl>' +
+        '<p class="pend-motivo">' + p.motivo + '</p>' +
+        '<div class="pend-actions">' +
+          '<button type="button" class="btn btn-reject" data-action="rechazar">Rechazar</button>' +
+          '<button type="button" class="btn btn-approve" data-action="aprobar">Aprobar</button>' +
+        '</div>';
+      listaPendientes.appendChild(li);
+    });
+    actualizarContadorPendientes();
+  }
+
+  listaPendientes.addEventListener('click', function (ev) {
+    var btn = ev.target.closest('button[data-action]');
+    if (!btn) return;
+    var card = btn.closest('.pendiente-card');
+    var idx = Number(card.dataset.idx);
+    var accion = btn.getAttribute('data-action');
+
+    card.querySelectorAll('button').forEach(function (b) { b.disabled = true; });
+
+    if (accion === 'aprobar') {
+      var flash = card.querySelector('.approved-flash');
+      flash.classList.add('show');
+    }
+
+    setTimeout(function () {
+      card.classList.add('leaving');
+      setTimeout(function () {
+        estado.pendientes.splice(idx, 1);
+        renderPendientes();
+      }, 340);
+    }, accion === 'aprobar' ? 420 : 60);
+  });
+
+  /* ==================== RENDER: EQUIPO (JEFE) ==================== */
+  var listaEquipo = document.getElementById('listaEquipo');
+
+  function renderEquipo() {
+    listaEquipo.innerHTML = '';
+    estado.equipo.forEach(function (p, i) {
+      var li = document.createElement('li');
+      li.className = 'equipo-item';
+      li.style.setProperty('--i', i);
+      li.innerHTML =
+        '<div class="equipo-info"><strong>' + p.nombre + '</strong><span>HE del mes: <span class="num">' + fmt(p.delMes) + '</span> hs</span></div>' +
+        '<div class="equipo-bar-track"><div class="equipo-bar" style="--pct:' + p.pct + '%"></div></div>' +
+        '<span class="equipo-saldo num">' + fmt(p.saldo) + ' hs</span>';
+      listaEquipo.appendChild(li);
+    });
+  }
+
+  /* ==================== MODALES ==================== */
+  function abrirModal(overlay) {
+    overlay.setAttribute('aria-hidden', 'false');
+    overlay.classList.add('open');
+    var focoInicial = overlay.querySelector('input, select, textarea, button');
+    if (focoInicial) setTimeout(function () { focoInicial.focus(); }, 40);
+  }
+  function cerrarModal(overlay) {
+    overlay.classList.remove('open');
+    overlay.setAttribute('aria-hidden', 'true');
+  }
+
+  document.querySelectorAll('.modal-overlay').forEach(function (overlay) {
+    overlay.addEventListener('click', function (ev) {
+      if (ev.target === overlay) cerrarModal(overlay);
+    });
+    overlay.querySelectorAll('[data-close]').forEach(function (b) {
+      b.addEventListener('click', function () { cerrarModal(overlay); });
+    });
+  });
+
+  document.addEventListener('keydown', function (ev) {
+    if (ev.key !== 'Escape') return;
+    document.querySelectorAll('.modal-overlay.open').forEach(function (o) { cerrarModal(o); });
+  });
+
+  var overlayHE = document.getElementById('overlayHE');
+  var overlayComp = document.getElementById('overlayComp');
+  var overlaySuccess = document.getElementById('overlaySuccess');
+  var successText = document.getElementById('successText');
+
+  document.getElementById('btnAbrirHE').addEventListener('click', function () {
+    document.getElementById('formHE').reset();
+    abrirModal(overlayHE);
+  });
+  document.getElementById('btnAbrirComp').addEventListener('click', function () {
+    document.getElementById('formComp').reset();
+    document.getElementById('demoInsuficiente').checked = false;
+    calcularComp();
+    abrirModal(overlayComp);
+  });
+
+  function mostrarExito(texto) {
+    successText.textContent = texto;
+    // reinicia las animaciones SVG por si se muestra dos veces seguidas
+    overlaySuccess.querySelectorAll('svg *').forEach(function (n) {
+      n.style.animation = 'none';
+      void n.offsetWidth;
+      n.style.animation = '';
+    });
+    abrirModal(overlaySuccess);
+    setTimeout(function () { cerrarModal(overlaySuccess); }, 1500);
+  }
+
+  /* ==================== FORM: CARGAR HORAS EXTRA ==================== */
+  document.getElementById('formHE').addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    var form = ev.target;
+    if (!form.reportValidity()) return;
+    var horas = parseFloat(form.horas.value.replace(',', '.')) || 0;
+    var linea = form.linea.value;
+    var fechaVal = form.fecha.value;
+    var fechaTxt = fechaVal ? fechaVal.split('-').reverse().join('/') : '-';
+
+    estado.solicitudes.unshift({
+      tipo: 'HE',
+      titulo: fmt(horas) + ' hs · ' + (form.motivo.value || 'Horas extra'),
+      fecha: fechaTxt,
+      linea: linea,
+      chip: 'pendiente'
+    });
+    renderSolicitudes();
+    cerrarModal(overlayHE);
+    mostrarExito('Horas extra enviadas');
+  });
+
+  /* ==================== FORM: PEDIR COMPENSACION ==================== */
+  var compHorasDescontar = document.getElementById('compHorasDescontar');
+  var compSaldoActual = document.getElementById('compSaldoActual');
+  var compSaldoResultante = document.getElementById('compSaldoResultante');
+  var compCalcBox = document.getElementById('compCalcBox');
+  var compError = document.getElementById('compError');
+  var btnEnviarComp = document.getElementById('btnEnviarComp');
+  var demoInsuficiente = document.getElementById('demoInsuficiente');
+  var formComp = document.getElementById('formComp');
+
+  function calcularComp() {
+    var tipo = formComp.tipo.value;
+    var horas = tipo === 'medio' ? 4 : 8;
+    var saldoBase = demoInsuficiente.checked ? 3.5 : estado.saldo;
+    var resultante = saldoBase - horas;
+    var insuficiente = resultante < 0;
+
+    compHorasDescontar.textContent = fmt(horas) + ' hs';
+    compSaldoActual.textContent = fmt(saldoBase) + ' hs';
+    compSaldoResultante.textContent = fmt(resultante) + ' hs';
+    compCalcBox.classList.toggle('invalid', insuficiente);
+    compError.hidden = !insuficiente;
+    btnEnviarComp.disabled = insuficiente;
+    btnEnviarComp.setAttribute('aria-disabled', insuficiente ? 'true' : 'false');
+
+    return { horas: horas, saldoBase: saldoBase, resultante: resultante, ok: !insuficiente };
+  }
+
+  Array.prototype.forEach.call(formComp.querySelectorAll('input[name="tipo"]'), function (r) {
+    r.addEventListener('change', calcularComp);
+  });
+  demoInsuficiente.addEventListener('change', calcularComp);
+
+  formComp.addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    var form = ev.target;
+    if (!form.reportValidity()) return;
+    var calc = calcularComp();
+    if (!calc.ok) return; // bloqueado: saldo insuficiente
+
+    var fechaVal = form.fecha.value;
+    var fechaTxt = fechaVal ? fechaVal.split('-').reverse().join('/') : '-';
+    var tipoTxt = form.tipo.value === 'medio' ? 'Medio dia' : 'Dia completo';
+
+    estado.solicitudes.unshift({
+      tipo: 'CP',
+      titulo: 'Compensacion · ' + tipoTxt,
+      fecha: fechaTxt,
+      linea: '-',
+      chip: 'pendiente'
+    });
+    renderSolicitudes();
+    cerrarModal(overlayComp);
+    mostrarExito('Compensacion solicitada');
+  });
+
+  /* ==================== INIT ==================== */
+  renderSolicitudes();
+  renderPendientes();
+  renderEquipo();
+  calcularComp();
+
+  document.getElementById('saldoGeneradas').textContent = fmt(estado.generadas);
+  document.getElementById('saldoCompensadas').textContent = fmt(estado.compensadas);
+  animarNumero(document.getElementById('saldoNumber'), estado.saldo, 900);
+
+})();
+</script>

@@ -106,6 +106,50 @@ function _sufijoId() {
   return Utilities.getUuid().slice(0, 4);
 }
 
+/**
+ * Normaliza el titulo de una pregunta de formulario para poder compararlo
+ * sin depender de tildes, mayusculas ni signos.
+ *
+ * Hace falta porque Google Forms usa el titulo EXACTO de la pregunta como
+ * clave de e.namedValues, con tildes incluidas. El campo de email que
+ * agrega Google cuando se activa "Recopilar direcciones de correo" se
+ * llama "Direccion de correo electronico" CON tildes, asi que buscarlo
+ * escrito sin tildes no encuentra nada y el email queda vacio. Sin email
+ * no hay saldo: el sistema entero queda en cero sin dar ningun error.
+ *
+ * "Dirección de correo electrónico" y "direccion de correo electronico"
+ * colapsan los dos a la misma clave.
+ */
+function _normClave(x) {
+  return String(x || '')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+/**
+ * Devuelve un lector de campos del formulario tolerante a como este
+ * escrito el titulo de la pregunta. Acepta varios alias y devuelve el
+ * primero que tenga contenido, o '' si ninguno matchea.
+ *
+ * Uso: const get = _lectorCampos(e.namedValues);
+ *      get('Cantidad de horas', 'Horas')
+ */
+function _lectorCampos(namedValues) {
+  const mapa = {};
+  Object.keys(namedValues || {}).forEach(k => {
+    mapa[_normClave(k)] = namedValues[k];
+  });
+  return function () {
+    for (let i = 0; i < arguments.length; i++) {
+      const v = mapa[_normClave(arguments[i])];
+      if (v && v[0] && String(v[0]).trim()) return String(v[0]).trim();
+    }
+    return '';
+  };
+}
+
 // ============================ SETUP ============================
 function setup() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -294,8 +338,7 @@ function nombreDe(email) {
  */
 function onFormSubmitHE(e) {
   const hojaOrigen = e.range.getSheet().getName().toUpperCase();
-  const v = e.namedValues;
-  const get = k => (v[k] && v[k][0]) ? v[k][0].trim() : '';
+  const get = _lectorCampos(e.namedValues);
 
   if (hojaOrigen.indexOf('COMP') >= 0) {
     _altaCompensacion(get);
@@ -310,11 +353,14 @@ function _altaHorasExtra(get) {
   const id = 'HE-' + Utilities.formatDate(new Date(), CONFIG.TZ, 'yyMMdd-HHmmss') + '-' + _sufijoId();
   const token = Utilities.getUuid();
 
-  const supervisor = get('Supervisor') || get('Nombre');
-  const email      = get('Email') || get('Direccion de correo electronico');
-  const fechaHE    = get('Fecha de las horas extra') || get('Fecha');
-  const horas      = parseFloat((get('Cantidad de horas') || get('Horas')).replace(',', '.')) || 0;
-  const linea      = get('Linea') || get('Sector');
+  const email      = get('Direccion de correo electronico', 'Email', 'Correo');
+  // El nombre no se le pide al supervisor: sale del directorio a partir del
+  // email verificado por Google. Un nombre tipeado a mano se escribe distinto
+  // cada vez y ensucia el resumen mensual, que agrupa por nombre.
+  const supervisor = get('Supervisor', 'Nombre') || nombreDe(email);
+  const fechaHE    = get('Fecha de las horas extra', 'Fecha');
+  const horas      = parseFloat(get('Cantidad de horas', 'Horas').replace(',', '.')) || 0;
+  const linea      = get('Linea', 'Línea', 'Sector');
   const motivo     = get('Motivo');
 
   // Resolver el destinatario ANTES de escribir la fila: si no hay Jefe
@@ -357,11 +403,11 @@ function _altaCompensacion(get) {
   const id = 'CP-' + Utilities.formatDate(new Date(), CONFIG.TZ, 'yyMMdd-HHmmss') + '-' + _sufijoId();
   const token = Utilities.getUuid();
 
-  const supervisor = get('Supervisor') || get('Nombre');
-  const email      = get('Email') || get('Direccion de correo electronico');
-  const fecha      = get('Fecha a compensar') || get('Fecha');
+  const email      = get('Direccion de correo electronico', 'Email', 'Correo');
+  const supervisor = get('Supervisor', 'Nombre') || nombreDe(email);
+  const fecha      = get('Fecha a compensar', 'Fecha solicitada', 'Fecha');
   const tipo       = get('Tipo') || 'Dia completo';
-  let horas        = parseFloat((get('Horas a compensar') || '').replace(',', '.'));
+  let horas        = parseFloat(get('Horas a compensar').replace(',', '.'));
   if (!horas) horas = (tipo.toUpperCase().indexOf('MEDIO') >= 0)
                       ? CONFIG.HORAS_POR_DIA / 2 : CONFIG.HORAS_POR_DIA;
 

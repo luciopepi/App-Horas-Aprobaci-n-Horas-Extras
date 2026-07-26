@@ -7,8 +7,11 @@
  *  2. Extensiones > Apps Script > pegar este codigo.
  *  3. Ejecutar setup() una vez (crea las 4 hojas y encabezados).
  *  4. Completar la hoja "Correos" con los correos reales del equipo
- *     (Email | Nombre | Rol | Linea | Activo). Roles validos: Supervisor,
- *     Jefe, RRHH. Tiene que haber al menos un Jefe activo.
+ *     (Email | Nombre | Rol | Activo). Roles validos: Supervisor,
+ *     Jefe, RRHH. Tiene que haber al menos un Jefe activo. La columna
+ *     Linea NO va aca: un supervisor puede cubrir mas de una linea, asi
+ *     que la linea se elige en cada solicitud (hoja Solicitudes), no
+ *     queda fija por persona.
  *     IMPORTANTE: los correos NO van en el codigo ni en el repo, se
  *     cargan a mano en esta hoja.
  *  5. Crear los 2 Google Forms (horas extra y compensacion) y vincular
@@ -40,7 +43,7 @@ const COL_SOL  = ['ID','Timestamp','Supervisor','Email','Fecha HE','Horas','Line
 const COL_COMP = ['ID','Timestamp','Supervisor','Email','Fecha solicitada','Horas a compensar',
                   'Tipo','Estado','Aprobado por','Fecha aprobacion','Comentario','Token'];
 const COL_LOG  = ['Timestamp','ID','Accion','Usuario','Detalle'];
-const COL_COR  = ['Email','Nombre','Rol','Linea','Activo'];
+const COL_COR  = ['Email','Nombre','Rol','Activo'];
 
 const ROLES_VALIDOS = ['Supervisor', 'Jefe', 'RRHH'];
 
@@ -141,15 +144,17 @@ function _ensureHojaCorreos(ss) {
     // sistema le mandaba el nombre del supervisor, las horas, el motivo y
     // el LINK CON TOKEN VALIDO a un tercero. Reemplazar esta fila por el
     // correo real del Jefe y poner Activo=SI.
-    sh.appendRow(['REEMPLAZAR@invalid', 'M. Rivas', 'Jefe', '', 'NO']);
+    sh.appendRow(['REEMPLAZAR@invalid', 'M. Rivas', 'Jefe', 'NO']);
   }
 }
 
 // ==================== DIRECTORIO (hoja Correos) ====================
 /**
  * Devuelve el listado de personas activas de la hoja "Correos" como
- * array de {email, nombre, rol, linea, activo}. Cachea el resultado
+ * array de {email, nombre, rol, activo}. Cachea el resultado
  * (scriptCache, 300s); si el cache falla, lee la hoja directamente.
+ * No incluye Linea: un supervisor puede cubrir mas de una, asi que no
+ * queda fija por persona en este directorio (ver Solicitudes.Linea).
  */
 function _directorio() {
   const cache = _cacheSeguro();
@@ -171,7 +176,6 @@ function _directorio() {
   const cEmail  = _idx(enc, 'Email');
   const cNombre = _idx(enc, 'Nombre');
   const cRol    = _idx(enc, 'Rol');
-  const cLinea  = _idx(enc, 'Linea');
   const cActivo = _idx(enc, 'Activo');
 
   const directorio = [];
@@ -183,7 +187,6 @@ function _directorio() {
       email:  _normEmail(fila[cEmail]),
       nombre: String(fila[cNombre]).trim(),
       rol:    _normRol(fila[cRol]),
-      linea:  String(fila[cLinea]).trim(),
       activo: 'SI'
     });
   }

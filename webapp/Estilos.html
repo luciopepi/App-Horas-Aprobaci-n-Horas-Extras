@@ -12,6 +12,16 @@
   svg { display: block; }
   a { color: inherit; }
 
+  /* El atributo hidden lo oculta el navegador con [hidden]{display:none},
+     pero esa regla es de la hoja del USER AGENT, y CUALQUIER regla nuestra
+     que fije display le gana (las del autor siempre pisan a las del
+     navegador, sin importar especificidad). Por eso .pantalla-error, que
+     declara display:flex, quedaba visible aunque tuviera hidden puesto: se
+     veia el cartel de error permanentemente por encima de la app, aunque
+     todo hubiera cargado bien. Esta regla hace que hidden gane siempre.
+     Va al principio y con !important a proposito. */
+  [hidden] { display: none !important; }
+
   /* ==================== TOKENS: PALETA MAESTRA (fijos, no se retematizan) ==================== */
   :root {
     color-scheme: dark;

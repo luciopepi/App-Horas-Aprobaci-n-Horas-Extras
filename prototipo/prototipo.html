@@ -360,7 +360,7 @@
   .dot-gen { background: var(--vspt-amber); }
   .dot-comp { background: var(--vspt-wine); }
 
-  /* Grilla de KPIs chicos (vista RRHH) */
+  /* Grilla de KPIs chicos (vista Personas) */
   .kpi-grid {
     display: grid;
     grid-template-columns: 1fr;
@@ -598,7 +598,7 @@
     .jefe-grid { display: grid; grid-template-columns: 1.3fr 1fr; gap: 18px; align-items: start; }
   }
 
-  /* ==================== TABLA (vista RRHH) ==================== */
+  /* ==================== TABLA (vista Personas) ==================== */
   .tabla-wrap { overflow-x: auto; }
   table.tabla { width: 100%; border-collapse: collapse; min-width: 480px; }
   table.tabla thead th {
@@ -890,7 +890,7 @@
         <div class="role-switch" role="tablist" aria-label="Elegir rol">
           <button type="button" class="role-btn active" data-role="supervisor" role="tab" aria-selected="true">Supervisor</button>
           <button type="button" class="role-btn" data-role="jefe" role="tab" aria-selected="false">Jefe</button>
-          <button type="button" class="role-btn" data-role="rrhh" role="tab" aria-selected="false">RRHH</button>
+          <button type="button" class="role-btn" data-role="personas" role="tab" aria-selected="false">Personas</button>
         </div>
         <button type="button" class="theme-toggle" id="themeToggle" aria-label="Cambiar a modo claro">
           <svg id="iconMoon" class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"/></svg>
@@ -956,7 +956,7 @@
       <p class="foot-note">VSPT Wine Group · Planta Graffigna · San Juan, Argentina</p>
     </section>
 
-    <!-- ==================== VISTA RRHH (solo lectura) ==================== -->
+    <!-- ================ VISTA PERSONAS (solo lectura) ================ -->
     <section id="viewRrhh" class="view" aria-labelledby="tituloRrhh">
       <h1 id="tituloRrhh" class="visually-hidden">Vista Gerencia de Personas</h1>
 
@@ -1185,12 +1185,12 @@
     aplicarIconoTema();
   })();
 
-  /* ==================== ROLES (Supervisor / Jefe / RRHH) ==================== */
+  /* ============== ROLES (Supervisor / Jefe / Personas) ============== */
   var roleBtns = document.querySelectorAll('.role-btn');
   var vistas = {
     supervisor: document.getElementById('viewSupervisor'),
     jefe: document.getElementById('viewJefe'),
-    rrhh: document.getElementById('viewRrhh')
+    personas: document.getElementById('viewRrhh')
   };
 
   function setRole(rol) {
@@ -1332,7 +1332,7 @@
     });
   }
 
-  /* ==================== RENDER: RRHH (solo lectura) ==================== */
+  /* ============== RENDER: PERSONAS (solo lectura) ============== */
   function renderRrhh() {
     var totalMes = estado.equipo.reduce(function (acc, p) { return acc + p.delMes; }, 0);
     var saldoTotal = estado.equipo.reduce(function (acc, p) { return acc + p.saldo; }, 0);

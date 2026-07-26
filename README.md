@@ -13,11 +13,11 @@ Sistema para que los **supervisores** carguen sus horas extra y días de compens
 - Carga de horas extra por parte del supervisor (Google Form, y a futuro desde la WebApp propia).
 - Notificación al correo del jefe con botones **APROBAR / RECHAZAR** (link con token único, sin abrir la planilla).
 - Acumulación del saldo de horas aprobadas por supervisor.
-- Segundo flujo: solicitud de **días de compensación** contra ese saldo, con la misma aprobación. El saldo insuficiente se **bloquea** automáticamente (no llega a quedar Pendiente).
-- Copia informativa a RRHH / Gestión de Personas.
+- Segundo flujo: solicitud de **días de compensación** contra ese saldo, con la misma aprobación. Si el saldo no alcanza, la solicitud **queda igual en Pendiente** con la alerta visible en el mail: la decisión es del jefe. Aprobar en descubierto pide confirmación explícita y queda asentado en la auditoría.
+- Copia informativa a Gerencia de Personas.
 - **Resumen mensual** automático enviado al jefe (día 1, 07:00).
 - Directorio de correos y roles administrable desde una hoja propia (`Correos`), sin tocar el código.
-- Vista de solo lectura para **RRHH / Gestión de Personas** en el prototipo de la WebApp: saldos de todo el equipo, sin botones de aprobación ni edición.
+- Vista de solo lectura para **Gerencia de Personas** en el prototipo de la WebApp: saldos de todo el equipo, sin botones de aprobación ni edición.
 
 ## Arquitectura
 
@@ -47,10 +47,10 @@ Sistema para que los **supervisores** carguen sus horas extra y días de compens
 
 `Email | Nombre | Rol | Activo`
 
-- `Rol`: `Supervisor` | `Jefe` | `RRHH` (con validación de datos en la celda).
+- `Rol`: `Supervisor` | `Jefe` | `Personas` (con validación de datos en la celda). El área se llama Gerencia de Personas, así que ese es el nombre canónico del rol; el código sigue aceptando `RRHH` y `Gestión de Personas` como sinónimos para no romper planillas cargadas con la nomenclatura anterior.
 - `Activo`: `SI` | `NO` (con validación de datos en la celda).
 - **Sin columna `Linea`**: un supervisor puede cubrir más de una línea, así que no tiene sentido atarle una fija en el directorio. La línea se elige en cada carga, en la hoja `Solicitudes` (columna `Linea` de esa hoja, sin cambios).
-- Tiene que haber **al menos un Jefe activo** cargado para que el sistema pueda notificar y aprobar. El rol `RRHH` solo da acceso de **lectura** (copia informativa de mails y, en el prototipo, la vista de consulta) — no aprueba ni edita nada.
+- Tiene que haber **al menos un Jefe activo** cargado para que el sistema pueda notificar y aprobar. El rol `Personas` solo da acceso de **lectura** (copia informativa de mails y, en el prototipo, la vista de consulta) — no aprueba ni edita nada.
 - El script lee esta hoja a través de `_directorio()`, con cache de 5 minutos (`CacheService`). Si editás la hoja y necesitás que el cambio se vea al toque, corré manualmente `invalidarCacheDirectorio()` desde el editor de Apps Script.
 - `setup()` deja una fila de ejemplo con `Activo = NO` y el email `REEMPLAZAR@invalid` (dominio `.invalid`, reservado por RFC 2606: nunca resuelve ni recibe correo real). Reemplazá esa fila por el Jefe real y poné `Activo = SI`. `jefeEmail()` rechaza explícitamente cualquier correo con dominio `.invalid` o `.example`, así que el sistema no puede quedar "funcionando" con el placeholder puesto por error.
 
@@ -69,7 +69,7 @@ Convenciones:
 3. Ejecutar `setup()` una vez (crea las 4 hojas con encabezados: `Solicitudes`, `Compensaciones`, `Auditoria`, `Correos`).
 4. Completar la hoja `Correos` con los correos y roles reales del equipo (al menos un `Jefe` activo). Los correos **no se cargan en el código**.
 5. Crear los 2 Google Forms y vincular sus respuestas a este Sheet. Las hojas destino deben contener `HE` o `COMP` en el nombre (así rutea `onFormSubmitHE`).
-6. **Implementar → Nueva implementación → Aplicación web** con *Ejecutar como: YO* y *Acceso: Cualquier usuario*. Copiar la URL a `CONFIG.WEBAPP_URL`.
+6. **Implementar → Nueva implementación → Aplicación web** con *Ejecutar como: YO* y *Acceso: Cualquier usuario de <dominio de la empresa>*. El acceso por dominio (y no «cualquier usuario») es lo que hace que Google bloquee el login de cuentas ajenas y que `Session.getActiveUser().getEmail()` devuelva el correo real de quien aprueba. Copiar la URL a `CONFIG.WEBAPP_URL`.
 7. Activadores:
    - `onFormSubmitHE` → *Desde hoja de cálculo / Al enviar formulario*.
    - `resumenMensual` → *Basado en tiempo / Mensual, día 1, 07:00*.
@@ -83,13 +83,13 @@ Convenciones:
 | `HORAS_POR_DIA` | Equivalencia día → horas para compensación (8) |
 | `TZ` | `America/Argentina/San_Juan` |
 
-Los correos del jefe y de RRHH **ya no están en `CONFIG`**: se leen dinámicamente de la hoja `Correos` mediante `jefeEmail()` y `rrhhEmails()`.
+Los correos del jefe y de Gerencia de Personas **ya no están en `CONFIG`**: se leen dinámicamente de la hoja `Correos` mediante `jefeEmail()` y `personasEmails()`.
 
 ## Prototipo visual (`prototipo/prototipo.html`)
 
 Maqueta navegable, autocontenida (sin CDNs ni dependencias externas), con datos mock, pensada para aprobar el diseño de la futura WebApp antes de programarla. Se abre directamente en el navegador.
 
-Incluye selector de rol (Supervisor / Jefe / RRHH), las tres vistas completas (la de RRHH es de solo lectura), modales de carga y compensación, animaciones de éxito/aprobación, y modo claro/oscuro.
+Incluye selector de rol (Supervisor / Jefe / Personas), las tres vistas completas (la de Personas es de solo lectura), modales de carga y compensación, animaciones de éxito/aprobación, y modo claro/oscuro.
 
 ### Sistema de diseño
 

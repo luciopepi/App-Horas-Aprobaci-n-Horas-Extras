@@ -8,7 +8,7 @@
  *  3. Ejecutar setup() una vez (crea las 4 hojas y encabezados).
  *  4. Completar la hoja "Correos" con los correos reales del equipo
  *     (Email | Nombre | Rol | Activo). Roles validos: Supervisor,
- *     Jefe, RRHH. Tiene que haber al menos un Jefe activo. La columna
+ *     Jefe, Personas. Tiene que haber al menos un Jefe activo. La columna
  *     Linea NO va aca: un supervisor puede cubrir mas de una linea, asi
  *     que la linea se elige en cada solicitud (hoja Solicitudes), no
  *     queda fija por persona.
@@ -31,7 +31,7 @@
  *
  * Si se edita la hoja "Correos" (alta, baja, cambio de rol o de activo),
  * correr invalidarCacheDirectorio() para que el cambio se refleje al toque
- * en jefeEmail(), rrhhEmails(), rolDe() y nombreDe(). Si no se corre, el
+ * en jefeEmail(), personasEmails(), rolDe() y nombreDe(). Si no se corre, el
  * cambio se aplica solo igual, pero puede tardar hasta 5 minutos por el cache.
  */
 
@@ -52,7 +52,7 @@ const COL_COMP = ['ID','Timestamp','Supervisor','Email','Fecha solicitada','Hora
 const COL_LOG  = ['Timestamp','ID','Accion','Usuario','Detalle'];
 const COL_COR  = ['Email','Nombre','Rol','Activo'];
 
-const ROLES_VALIDOS = ['Supervisor', 'Jefe', 'RRHH'];
+const ROLES_VALIDOS = ['Supervisor', 'Jefe', 'Personas'];
 
 const CACHE_KEY_DIRECTORIO = 'directorio_correos';
 const CACHE_TTL_DIRECTORIO = 300; // segundos
@@ -70,16 +70,22 @@ function _normEmail(x) {
 }
 
 /**
- * Normaliza un rol a su forma canonica (Supervisor/Jefe/RRHH), sin
+ * Normaliza un rol a su forma canonica (Supervisor/Jefe/Personas), sin
  * importar mayusculas/minusculas. La validacion de datos de Sheets es
  * case-insensitive, asi que "jefe" tipeado a mano tiene que matchear
  * igual que "Jefe".
+ *
+ * El area se llama Gerencia de Personas, asi que el rol canonico es
+ * "Personas". Se siguen aceptando "RRHH" y "Gestion de Personas" como
+ * sinonimos para no romper planillas cargadas con la nomenclatura vieja.
  */
 function _normRol(x) {
   const r = String(x || '').trim().toLowerCase();
   if (r === 'jefe') return 'Jefe';
-  if (r === 'rrhh') return 'RRHH';
   if (r === 'supervisor') return 'Supervisor';
+  if (r === 'personas' || r === 'rrhh' ||
+      r === 'gestion de personas' || r === 'gestión de personas' ||
+      r === 'gerencia de personas') return 'Personas';
   return '';
 }
 
@@ -118,7 +124,7 @@ function _ensureSheet(ss, name, headers) {
   if (!sh) sh = ss.insertSheet(name);
   if (sh.getLastRow() === 0) {
     sh.getRange(1, 1, 1, headers.length).setValues([headers])
-      .setFontWeight('bold').setBackground('#7B2233').setFontColor('#FFFFFF');
+      .setFontWeight('bold').setBackground('#4E1742').setFontColor('#FFFFFF');
     sh.setFrozenRows(1);
   }
   return sh;
@@ -223,7 +229,7 @@ function _cacheSeguro() {
 /**
  * Correr manualmente despues de editar la hoja "Correos" (alta, baja,
  * cambio de rol o de Activo) para que el cambio se vea de inmediato en
- * jefeEmail(), rrhhEmails(), rolDe() y nombreDe(). Sin esto, el cache
+ * jefeEmail(), personasEmails(), rolDe() y nombreDe(). Sin esto, el cache
  * vence solo a los 5 minutos.
  */
 function invalidarCacheDirectorio() {
@@ -244,11 +250,25 @@ function jefeEmail() {
   return jefe.email;
 }
 
-function rrhhEmails() {
+/**
+ * Correos de Gerencia de Personas (copia informativa y resumen mensual),
+ * separados por coma. Puede devolver vacio si no hay nadie cargado con
+ * ese rol: en ese caso quien llama debe omitir el cc, no mandarlo vacio.
+ */
+function personasEmails() {
   return _directorio()
-    .filter(p => p.rol === 'RRHH' && !_esEmailPlaceholder(p.email))
+    .filter(p => p.rol === 'Personas' && !_esEmailPlaceholder(p.email))
     .map(p => p.email)
     .join(',');
+}
+
+/**
+ * Alias historico de personasEmails(). El rol se llamaba RRHH antes de
+ * adoptar la nomenclatura del area (Gerencia de Personas). Se conserva
+ * para no romper llamadas viejas.
+ */
+function rrhhEmails() {
+  return personasEmails();
 }
 
 function rolDe(email) {
@@ -537,7 +557,7 @@ function _notificarResultado(fila, estado, esComp, enc) {
     '<p style="font-size:11px;color:#777">' + CONFIG.NOMBRE_PLANTA + '</p>';
 
   const opciones = { to: email, subject: asunto, htmlBody: cuerpo };
-  const cc = rrhhEmails();
+  const cc = personasEmails();
   if (cc) opciones.cc = cc;
   MailApp.sendEmail(opciones);
 }
@@ -645,7 +665,7 @@ function resumenMensual() {
     '</div>';
 
   const opciones = { to: jefeEmail(), subject: 'Resumen mensual de Horas Extra - ' + per, htmlBody: html };
-  const cc = rrhhEmails();
+  const cc = personasEmails();
   if (cc) opciones.cc = cc;
   MailApp.sendEmail(opciones);
 }

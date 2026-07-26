@@ -1,0 +1,550 @@
+<script>
+(function () {
+  "use strict";
+
+  /* ==================== ICONOS (trazo Lucide, dibujados a mano) ==================== */
+  var ICONS = {
+    check: '<path d="M20 6 9 17l-5-5"/>',
+    x: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+    clock: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
+    user: '<path d="M20 21a8 8 0 0 0-16 0"/><circle cx="12" cy="7" r="4"/>',
+    chevronRight: '<path d="m9 6 6 6-6 6"/>',
+    calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/>',
+    alertTriangle: '<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/><path d="M12 9v4"/><path d="M12 17h.01"/>'
+  };
+  function svgIcon(nombre, clase) {
+    return '<svg class="icon ' + (clase || '') + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+      'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + ICONS[nombre] + '</svg>';
+  }
+
+  var fmt = function (n) {
+    return (Math.round((n || 0) * 10) / 10).toFixed(1).replace('.', ',');
+  };
+
+  // Escapa texto antes de insertarlo con innerHTML. El "Motivo" lo escribe
+  // el supervisor y se termina mostrando en la pantalla del Jefe, asi que
+  // nunca hay que volcarlo crudo en el HTML.
+  var _escDiv = document.createElement('div');
+  function esc(valor) {
+    _escDiv.textContent = valor == null ? '' : String(valor);
+    return _escDiv.innerHTML;
+  }
+
+  /* ==================== LLAMADAS AL SERVIDOR ==================== */
+  // Todas pasan por withFailureHandler: ningun boton se queda "colgado"
+  // sin feedback si el servidor tira un error (rol invalido, saldo
+  // insuficiente, solicitud ya procesada, etc.).
+  function llamarServidor(nombreFuncion) {
+    var args = Array.prototype.slice.call(arguments, 1);
+    return new Promise(function (resolve, reject) {
+      var runner = google.script.run
+        .withSuccessHandler(resolve)
+        .withFailureHandler(function (error) {
+          reject(error && error.message ? error : new Error(String(error)));
+        });
+      runner[nombreFuncion].apply(runner, args);
+    });
+  }
+
+  /* ==================== TEMA ==================== */
+  var root = document.documentElement;
+  var themeToggle = document.getElementById('themeToggle');
+  var iconMoon = document.getElementById('iconMoon');
+  var iconSun = document.getElementById('iconSun');
+
+  function temaActual() {
+    var explicito = root.getAttribute('data-theme');
+    if (explicito) return explicito;
+    return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  }
+
+  function aplicarIconoTema() {
+    var esOscuro = temaActual() === 'dark';
+    iconMoon.hidden = !esOscuro;
+    iconSun.hidden = esOscuro;
+    themeToggle.setAttribute('aria-label', esOscuro ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro');
+  }
+
+  themeToggle.addEventListener('click', function () {
+    var nuevo = temaActual() === 'dark' ? 'light' : 'dark';
+    root.setAttribute('data-theme', nuevo);
+    try { localStorage.setItem('horasextra_tema', nuevo); } catch (err) { /* modo privado, no critico */ }
+    aplicarIconoTema();
+  });
+
+  (function initTema() {
+    var guardado = null;
+    try { guardado = localStorage.getItem('horasextra_tema'); } catch (err) { /* no critico */ }
+    if (guardado === 'dark' || guardado === 'light') root.setAttribute('data-theme', guardado);
+    aplicarIconoTema();
+  })();
+
+  /* ==================== CONTADOR ANIMADO ==================== */
+  function animarNumero(el, destino, duracionMs, sufijo) {
+    var inicio = 0;
+    var t0 = null;
+    function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
+    function paso(ts) {
+      if (t0 === null) t0 = ts;
+      var progreso = Math.min(1, (ts - t0) / duracionMs);
+      var valor = inicio + (destino - inicio) * easeOutCubic(progreso);
+      el.textContent = fmt(valor) + (sufijo || '');
+      if (progreso < 1) requestAnimationFrame(paso);
+      else el.textContent = fmt(destino) + (sufijo || '');
+    }
+    requestAnimationFrame(paso);
+  }
+
+  /* ==================== PANTALLAS: cargando / error / app ==================== */
+  var viewCargando = document.getElementById('viewCargando');
+  var viewError = document.getElementById('viewError');
+  var errorTitulo = document.getElementById('errorTitulo');
+  var errorMensaje = document.getElementById('errorMensaje');
+  var rolePill = document.getElementById('rolePill');
+  var TODAS_LAS_VISTAS = ['viewSupervisor', 'viewJefe', 'viewPersonas'];
+
+  function ocultarTodo() {
+    viewCargando.hidden = true;
+    viewError.hidden = true;
+    TODAS_LAS_VISTAS.forEach(function (id) {
+      var el = document.getElementById(id);
+      el.hidden = true;
+      el.classList.remove('active');
+    });
+  }
+
+  function mostrarCargando() {
+    ocultarTodo();
+    viewCargando.hidden = false;
+  }
+
+  function mostrarError(err) {
+    ocultarTodo();
+    errorMensaje.textContent = (err && err.message) ? err.message :
+      'No pudimos conectar con el servidor. Revisa tu conexion e intenta de nuevo.';
+    viewError.hidden = false;
+  }
+
+  var ROL_ETIQUETA = { Supervisor: 'Supervisor', Jefe: 'Jefe', Personas: 'Gerencia de Personas' };
+
+  function mostrarVista(rol) {
+    ocultarTodo();
+    rolePill.hidden = false;
+    rolePill.textContent = ROL_ETIQUETA[rol] || rol;
+    var idVista = rol === 'Supervisor' ? 'viewSupervisor' : rol === 'Jefe' ? 'viewJefe' : 'viewPersonas';
+    var el = document.getElementById(idVista);
+    el.hidden = false;
+    el.classList.add('active');
+  }
+
+  document.getElementById('btnReintentar').addEventListener('click', cargarEstado);
+
+  /* ==================== ESTADO GLOBAL EN MEMORIA (lo ultimo que mando el servidor) ==================== */
+  var estadoActual = null;
+
+  async function cargarEstado() {
+    mostrarCargando();
+    try {
+      var data = await llamarServidor('apiEstado');
+      estadoActual = data;
+      mostrarVista(data.yo.rol);
+      if (data.yo.rol === 'Supervisor') renderSupervisor(data);
+      if (data.yo.rol === 'Jefe') renderJefe(data);
+      if (data.yo.rol === 'Personas') renderPersonas(data);
+
+      // El Jefe tambien puede cargar horas extra propias. Si tiene
+      // actividad, ademas de su bandeja de pendientes ve su panel
+      // personal (saldo, historial y botones de carga), que si no
+      // quedaria invisible: cargaria horas que nunca podria consultar.
+      if (data.yo.rol !== 'Supervisor' && data.mostrarPanelPersonal) {
+        var panel = document.getElementById('viewSupervisor');
+        panel.hidden = false;
+        panel.classList.add('active');
+        renderSupervisor(data);
+      }
+    } catch (err) {
+      mostrarError(err);
+    }
+  }
+
+  /* ==================== RENDER: SUPERVISOR ==================== */
+  function chipInfo(estado) {
+    var e = String(estado || '').toLowerCase();
+    if (e === 'aprobada') return { clase: 'chip-aprobada', texto: 'Aprobada', icono: 'check' };
+    if (e === 'rechazada') return { clase: 'chip-rechazada', texto: 'Rechazada', icono: 'x' };
+    return { clase: 'chip-pendiente', texto: 'Pendiente', icono: 'clock' };
+  }
+
+  function estadoVacio(mensaje, submensaje) {
+    return '<li class="estado-vacio">' + svgIcon('calendar', 'icon-32') +
+      '<strong>' + esc(mensaje) + '</strong><span>' + esc(submensaje) + '</span></li>';
+  }
+
+  function unificarSolicitudes(data) {
+    var lista = [];
+    (data.misSolicitudes || []).forEach(function (s) {
+      lista.push({
+        id: s.id, tipo: 'HE',
+        titulo: fmt(s.horas) + ' hs · ' + (s.motivo || 'Horas extra'),
+        fecha: s.fecha, linea: s.linea, estado: s.estado
+      });
+    });
+    (data.misCompensaciones || []).forEach(function (s) {
+      lista.push({
+        id: s.id, tipo: 'CP',
+        titulo: 'Compensacion · ' + (s.tipo || ''),
+        fecha: s.fecha, linea: '-', estado: s.estado
+      });
+    });
+    lista.sort(function (a, b) { return a.id < b.id ? 1 : -1; }); // el ID trae fecha-hora: mas nuevo primero
+    return lista;
+  }
+
+  function renderSupervisor(data) {
+    document.getElementById('saldoGeneradas').textContent = fmt(data.saldo.generadas);
+    document.getElementById('saldoCompensadas').textContent = fmt(data.saldo.compensadas);
+    animarNumero(document.getElementById('saldoNumber'), data.saldo.disponible, 700, ' hs');
+
+    var lista = unificarSolicitudes(data);
+    var cont = document.getElementById('listaSolicitudes');
+    cont.innerHTML = '';
+    if (!lista.length) {
+      cont.innerHTML = estadoVacio('No tenes solicitudes todavia', 'Cargá tu primera hora extra con el boton de arriba.');
+      return;
+    }
+    lista.forEach(function (s, i) {
+      var li = document.createElement('li');
+      li.className = 'solicitud-item';
+      li.style.setProperty('--i', i);
+      var info = chipInfo(s.estado);
+      li.innerHTML =
+        '<div class="sol-main">' +
+          '<span class="sol-tipo">' + esc(s.tipo) + '</span>' +
+          '<div class="sol-info"><strong>' + esc(s.titulo) + '</strong><span class="sol-meta">' + esc(s.fecha) + (s.linea && s.linea !== '-' ? ' · ' + esc(s.linea) : '') + '</span></div>' +
+        '</div>' +
+        '<span class="chip ' + info.clase + '">' + svgIcon(info.icono, 'icon-14') + info.texto + '</span>' +
+        '<span class="sol-chevron">' + svgIcon('chevronRight', 'icon-16') + '</span>';
+      cont.appendChild(li);
+    });
+  }
+
+  /* ==================== RENDER: JEFE ==================== */
+  function renderJefe(data) {
+    var cont = document.getElementById('listaPendientes');
+    var pendCount = document.getElementById('pendCount');
+    var pendientes = data.pendientes || [];
+    pendCount.textContent = pendientes.length;
+    cont.innerHTML = '';
+
+    if (!pendientes.length) {
+      cont.innerHTML = estadoVacio('No hay nada pendiente', 'Cuando alguien cargue horas o pida compensacion, aparece aca.');
+    } else {
+      pendientes.forEach(function (p, i) {
+        var li = document.createElement('li');
+        li.className = 'pendiente-card surface card-atencion';
+        li.style.setProperty('--i', i);
+        li.dataset.id = p.id;
+        li.innerHTML =
+          '<div class="approved-flash">' + svgIcon('check', 'icon-18') + '<span>Aprobada</span></div>' +
+          '<div class="pend-top">' +
+            '<div class="pend-who"><span class="pend-avatar">' + svgIcon('user', 'icon-16') + '</span><strong>' + esc(p.nombre) + '</strong></div>' +
+            '<span class="chip chip-pendiente">' + svgIcon('clock', 'icon-14') + 'Pendiente</span>' +
+          '</div>' +
+          '<dl class="pend-grid">' +
+            '<div><dt>Fecha</dt><dd>' + esc(p.fecha) + '</dd></div>' +
+            '<div><dt>Horas</dt><dd class="num">' + fmt(p.horas) + ' hs</dd></div>' +
+            '<div><dt>Linea</dt><dd>' + esc(p.linea) + '</dd></div>' +
+          '</dl>' +
+          '<p class="pend-motivo">' + esc(p.motivo) + '</p>' +
+          '<div class="pend-actions">' +
+            '<button type="button" class="btn btn-reject" data-action="rechazar">' + svgIcon('x', 'icon-16') + 'Rechazar</button>' +
+            '<button type="button" class="btn btn-approve" data-action="aprobar">' + svgIcon('check', 'icon-16') + 'Aprobar</button>' +
+          '</div>' +
+          '<div class="confirmar-descubierto" data-confirmar>' +
+            '<p>' + svgIcon('alertTriangle', 'icon-16') + '<span data-confirmar-msg></span></p>' +
+            '<button type="button" class="btn btn-ghost btn-sm" data-action="aprobar-igual">Aprobar en descubierto</button>' +
+          '</div>';
+        cont.appendChild(li);
+      });
+    }
+
+    renderEquipoLista(data.equipo || []);
+  }
+
+  function renderEquipoLista(equipo) {
+    var cont = document.getElementById('listaEquipo');
+    cont.innerHTML = '';
+    if (!equipo.length) {
+      cont.innerHTML = estadoVacio('Todavia no hay supervisores', 'Cargalos en la hoja "Correos" con rol Supervisor.');
+      return;
+    }
+    var maxSaldo = Math.max.apply(null, equipo.map(function (p) { return p.saldo; }).concat([1]));
+    equipo.forEach(function (p, i) {
+      var pct = maxSaldo > 0 ? Math.max(4, Math.round((p.saldo / maxSaldo) * 100)) : 4;
+      var li = document.createElement('li');
+      li.className = 'equipo-item';
+      li.style.setProperty('--i', i);
+      li.innerHTML =
+        '<div class="equipo-info">' + svgIcon('user', 'icon-16') + '<strong>' + esc(p.nombre) + '</strong></div>' +
+        '<div class="equipo-sub">HE del mes: <span class="num">' + fmt(p.heDelMes) + '</span> hs</div>' +
+        '<div class="equipo-bar-track"><div class="equipo-bar" style="--pct:' + pct + '%"></div></div>' +
+        '<span class="equipo-saldo num">' + fmt(p.saldo) + ' hs</span>';
+      cont.appendChild(li);
+    });
+  }
+
+  document.getElementById('listaPendientes').addEventListener('click', function (ev) {
+    var btn = ev.target.closest('button[data-action]');
+    if (!btn) return;
+    var card = btn.closest('.pendiente-card');
+    var id = card.dataset.id;
+    var accion = btn.getAttribute('data-action');
+
+    if (accion === 'rechazar' || accion === 'aprobar') {
+      resolverPendiente(card, id, accion, false);
+    } else if (accion === 'aprobar-igual') {
+      resolverPendiente(card, id, 'aprobar', true);
+    }
+  });
+
+  async function resolverPendiente(card, id, accion, confirmar) {
+    card.querySelectorAll('button').forEach(function (b) { b.disabled = true; });
+    try {
+      var r = await llamarServidor('apiResolver', id, accion, confirmar);
+      if (r && r.requiereConfirmacion) {
+        // Saldo insuficiente en una compensacion: no es un error, es un
+        // estado intermedio. Mostramos el panel de confirmacion explicita
+        // y reactivamos los botones (menos el de aprobar directo, que ya
+        // no aplica: la proxima accion es "aprobar en descubierto").
+        var panel = card.querySelector('[data-confirmar]');
+        card.querySelector('[data-confirmar-msg]').textContent = r.mensaje;
+        panel.classList.add('show');
+        card.querySelectorAll('.pend-actions button').forEach(function (b) { b.disabled = false; });
+        return;
+      }
+      if (accion === 'aprobar') {
+        var flash = card.querySelector('.approved-flash');
+        flash.classList.add('show');
+      }
+      setTimeout(function () {
+        card.classList.add('leaving');
+        setTimeout(function () { cargarEstado(); }, 340);
+      }, accion === 'aprobar' ? 420 : 60);
+    } catch (err) {
+      // No dejamos el boton colgado: mostramos el error y reactivamos.
+      card.querySelectorAll('button').forEach(function (b) { b.disabled = false; });
+      window.alert(err.message || 'No se pudo procesar la solicitud.');
+    }
+  }
+
+  /* ==================== RENDER: PERSONAS (solo lectura) ==================== */
+  function renderPersonas(data) {
+    document.getElementById('personasTotalMes').textContent = fmt(data.totales.heDelMes) + ' hs';
+    document.getElementById('personasPendientes').textContent = String(data.totales.pendientes);
+    document.getElementById('personasSaldoTotal').textContent = fmt(data.totales.saldoTotal) + ' hs';
+
+    var tbody = document.getElementById('personasTablaBody');
+    tbody.innerHTML = '';
+    var equipo = data.equipo || [];
+    if (!equipo.length) {
+      tbody.innerHTML = '<tr><td colspan="4" style="padding:16px 10px;color:var(--muted)">Todavia no hay supervisores cargados.</td></tr>';
+      return;
+    }
+    equipo.forEach(function (p) {
+      var tr = document.createElement('tr');
+      tr.innerHTML =
+        '<td><span class="persona-cell">' + svgIcon('user', 'icon-14') + esc(p.nombre) + '</span></td>' +
+        '<td class="num-col num">' + fmt(p.heDelMes) + ' hs</td>' +
+        '<td class="num-col num">' + fmt(p.compensadas) + ' hs</td>' +
+        '<td class="num-col num"><strong>' + fmt(p.saldo) + ' hs</strong></td>';
+      tbody.appendChild(tr);
+    });
+  }
+
+  /* ==================== MODALES ==================== */
+  var appContainer = document.getElementById('appContainer');
+  var focoAntesDelModal = null;
+
+  function elementosFocosables(root) {
+    var selector = 'a[href], button:not([disabled]), input:not([disabled]), ' +
+      'select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+    return Array.prototype.filter.call(root.querySelectorAll(selector), function (el) {
+      return el.offsetParent !== null;
+    });
+  }
+
+  function atraparTab(overlay) {
+    return function (ev) {
+      if (ev.key !== 'Tab') return;
+      var focosables = elementosFocosables(overlay);
+      if (!focosables.length) return;
+      var primero = focosables[0];
+      var ultimo = focosables[focosables.length - 1];
+      if (ev.shiftKey && document.activeElement === primero) {
+        ev.preventDefault();
+        ultimo.focus();
+      } else if (!ev.shiftKey && document.activeElement === ultimo) {
+        ev.preventDefault();
+        primero.focus();
+      }
+    };
+  }
+
+  function abrirModal(overlay) {
+    focoAntesDelModal = document.activeElement;
+    if ('inert' in appContainer) appContainer.inert = true;
+    else appContainer.setAttribute('aria-hidden', 'true');
+    overlay.setAttribute('aria-hidden', 'false');
+    overlay.classList.add('open');
+    var focoInicial = overlay.querySelector('input, select, textarea, button');
+    if (focoInicial) setTimeout(function () { focoInicial.focus(); }, 40);
+    overlay._trapHandler = atraparTab(overlay);
+    overlay.addEventListener('keydown', overlay._trapHandler);
+  }
+  function cerrarModal(overlay) {
+    overlay.classList.remove('open');
+    overlay.setAttribute('aria-hidden', 'true');
+    if (overlay._trapHandler) {
+      overlay.removeEventListener('keydown', overlay._trapHandler);
+      overlay._trapHandler = null;
+    }
+    if ('inert' in appContainer) appContainer.inert = false;
+    else appContainer.removeAttribute('aria-hidden');
+    if (focoAntesDelModal && typeof focoAntesDelModal.focus === 'function') {
+      focoAntesDelModal.focus();
+    }
+    focoAntesDelModal = null;
+  }
+
+  document.querySelectorAll('.modal-overlay').forEach(function (overlay) {
+    overlay.addEventListener('click', function (ev) {
+      if (ev.target === overlay) cerrarModal(overlay);
+    });
+    overlay.querySelectorAll('[data-close]').forEach(function (b) {
+      b.addEventListener('click', function () { cerrarModal(overlay); });
+    });
+  });
+
+  document.addEventListener('keydown', function (ev) {
+    if (ev.key !== 'Escape') return;
+    document.querySelectorAll('.modal-overlay.open').forEach(function (o) { cerrarModal(o); });
+  });
+
+  var overlayHE = document.getElementById('overlayHE');
+  var overlayComp = document.getElementById('overlayComp');
+  var overlaySuccess = document.getElementById('overlaySuccess');
+  var successText = document.getElementById('successText');
+
+  document.getElementById('btnAbrirHE').addEventListener('click', function () {
+    document.getElementById('formHE').reset();
+    document.getElementById('errorHE').hidden = true;
+    abrirModal(overlayHE);
+  });
+  document.getElementById('btnAbrirComp').addEventListener('click', function () {
+    document.getElementById('formComp').reset();
+    document.getElementById('compError').hidden = true;
+    calcularComp();
+    abrirModal(overlayComp);
+  });
+
+  function mostrarExito(texto) {
+    successText.textContent = texto;
+    // reinicia las animaciones SVG por si se muestra dos veces seguidas
+    overlaySuccess.querySelectorAll('svg *').forEach(function (n) {
+      n.style.animation = 'none';
+      void n.offsetWidth;
+      n.style.animation = '';
+    });
+    abrirModal(overlaySuccess);
+    setTimeout(function () { cerrarModal(overlaySuccess); }, 1500);
+  }
+
+  /* ==================== FORM: CARGAR HORAS EXTRA ==================== */
+  var formHE = document.getElementById('formHE');
+  var btnEnviarHE = document.getElementById('btnEnviarHE');
+  var errorHE = document.getElementById('errorHE');
+  var errorHETexto = document.getElementById('errorHETexto');
+
+  formHE.addEventListener('submit', async function (ev) {
+    ev.preventDefault();
+    if (!formHE.reportValidity()) return;
+    errorHE.hidden = true;
+    btnEnviarHE.disabled = true;
+    try {
+      await llamarServidor('apiCrearHoraExtra', {
+        fecha: formHE.fecha.value,
+        horas: formHE.horas.value,
+        linea: formHE.linea.value,
+        motivo: formHE.motivo.value
+      });
+      cerrarModal(overlayHE);
+      mostrarExito('Horas extra enviadas');
+      cargarEstado(); // no asumimos que salio bien en la UI: releemos del servidor
+    } catch (err) {
+      errorHETexto.textContent = err.message || 'No se pudo enviar la solicitud.';
+      errorHE.hidden = false;
+    } finally {
+      btnEnviarHE.disabled = false;
+    }
+  });
+
+  /* ==================== FORM: PEDIR COMPENSACION ==================== */
+  var compHorasDescontar = document.getElementById('compHorasDescontar');
+  var compSaldoActual = document.getElementById('compSaldoActual');
+  var compSaldoResultante = document.getElementById('compSaldoResultante');
+  var compCalcBox = document.getElementById('compCalcBox');
+  var compError = document.getElementById('compError');
+  var compErrorTexto = document.getElementById('compErrorTexto');
+  var btnEnviarComp = document.getElementById('btnEnviarComp');
+  var formComp = document.getElementById('formComp');
+
+  function calcularComp() {
+    var tipo = formComp.tipo.value;
+    var horas = tipo === 'medio' ? 4 : 8;
+    var saldoActual = (estadoActual && estadoActual.saldo) ? estadoActual.saldo.disponible : 0;
+    var resultante = saldoActual - horas;
+    var insuficiente = resultante < 0;
+
+    compHorasDescontar.textContent = fmt(horas) + ' hs';
+    compSaldoActual.textContent = fmt(saldoActual) + ' hs';
+    compSaldoResultante.textContent = fmt(resultante) + ' hs';
+    compCalcBox.classList.toggle('invalid', insuficiente);
+    compErrorTexto.textContent = 'Saldo insuficiente: no se puede solicitar mas horas que las disponibles.';
+    compError.hidden = !insuficiente;
+    btnEnviarComp.disabled = insuficiente;
+    btnEnviarComp.setAttribute('aria-disabled', insuficiente ? 'true' : 'false');
+  }
+
+  Array.prototype.forEach.call(formComp.querySelectorAll('input[name="tipo"]'), function (r) {
+    r.addEventListener('change', calcularComp);
+  });
+
+  formComp.addEventListener('submit', async function (ev) {
+    ev.preventDefault();
+    if (!formComp.reportValidity()) return;
+    compError.hidden = true;
+    btnEnviarComp.disabled = true;
+    try {
+      await llamarServidor('apiCrearCompensacion', {
+        fecha: formComp.fecha.value,
+        tipo: formComp.tipo.value
+      });
+      cerrarModal(overlayComp);
+      mostrarExito('Compensacion solicitada');
+      cargarEstado();
+    } catch (err) {
+      // El bloqueo por saldo insuficiente llega como error del servidor:
+      // es el UNICO lugar donde se bloquea (ver ControlHorasExtra.gs).
+      compErrorTexto.textContent = err.message || 'No se pudo enviar la solicitud.';
+      compCalcBox.classList.add('invalid');
+      compError.hidden = false;
+    } finally {
+      btnEnviarComp.disabled = false;
+    }
+  });
+
+  /* ==================== INIT ==================== */
+  cargarEstado();
+
+})();
+</script>

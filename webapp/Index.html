@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <base target="_top">
+  <title>Horas Extra - Graffigna</title>
+  <!-- Montserrat por Google Fonts: en la WebApp real no hay CSP de Artifacts
+       que bloquee la CDN, asi que no hace falta embeberla (el prototipo si
+       la embebe, a proposito, y queda tal cual). -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:ital,wght@0,400;0,700;0,800&display=swap" rel="stylesheet">
+  <?!= include('Estilos'); ?>
+</head>
+<body>
+<div class="app-shell">
+  <div class="blobs" aria-hidden="true">
+    <div class="blob blob-1"></div>
+    <div class="blob blob-2"></div>
+  </div>
+
+  <div class="container" id="appContainer">
+
+    <header class="topbar">
+      <div class="brand">
+        <svg class="condor-logo" width="34" height="34" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Isotipo condor">
+          <defs>
+            <linearGradient id="condorGrad" x1="2" y1="10" x2="62" y2="54" gradientUnits="userSpaceOnUse">
+              <stop offset="0" stop-color="#F8C040"/>
+              <stop offset="1" stop-color="#F5EBD3"/>
+            </linearGradient>
+          </defs>
+          <path fill="url(#condorGrad)" d="M32 30.5
+            C 27 19, 14 11, 3 15
+            C 6 19.5, 12.5 21.5, 17.5 27
+            C 11 28.5, 4.5 34.5, 3.5 43
+            C 10.5 40.5, 18 37.5, 23.5 32.5
+            C 25.5 37, 28 42.5, 30 50
+            C 30.7 44.5, 31.4 38, 32 33.5
+            C 32.6 38, 33.3 44.5, 34 50
+            C 36 42.5, 38.5 37, 40.5 32.5
+            C 46 37.5, 53.5 40.5, 60.5 43
+            C 59.5 34.5, 53 28.5, 46.5 27
+            C 51.5 21.5, 58 19.5, 61 15
+            C 50 11, 37 19, 32 30.5 Z"/>
+          <circle cx="32" cy="27.5" r="2.6" fill="url(#condorGrad)"/>
+        </svg>
+        <div class="brand-text">
+          <strong>Control de Horas Extra</strong>
+          <span>Planta Graffigna · Fraccionamiento</span>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <span class="role-pill" id="rolePill" hidden></span>
+        <button type="button" class="theme-toggle" id="themeToggle" aria-label="Cambiar a modo claro">
+          <svg id="iconMoon" class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"/></svg>
+          <svg id="iconSun" class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" hidden>
+            <circle cx="12" cy="12" r="4"/>
+            <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- ==================== CARGANDO (skeleton) ==================== -->
+    <div id="viewCargando" aria-live="polite" aria-busy="true">
+      <div class="skeleton-wrap">
+        <div class="sk-kpi surface card">
+          <div class="sk-line label"></div>
+          <div class="sk-line value"></div>
+          <div class="sk-line sub"></div>
+        </div>
+        <div class="card surface">
+          <div class="sk-row"><div class="sk-block avatar"></div><div class="sk-line"></div></div>
+          <div class="sk-row"><div class="sk-block avatar"></div><div class="sk-line"></div></div>
+          <div class="sk-row"><div class="sk-block avatar"></div><div class="sk-line"></div></div>
+        </div>
+      </div>
+      <p class="visually-hidden">Cargando tu informacion...</p>
+    </div>
+
+    <!-- ==================== ERROR (usuario no habilitado, fallo de red, etc.) ==================== -->
+    <div id="viewError" class="pantalla-error surface card" hidden role="alert">
+      <svg class="icon icon-32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+      <h2 class="h2" id="errorTitulo">No pudimos cargar tu cuenta</h2>
+      <p id="errorMensaje">Ocurrio un problema.</p>
+      <button type="button" class="btn btn-ghost" id="btnReintentar">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v6h-6"/></svg>
+        Reintentar
+      </button>
+    </div>
+
+    <!-- ==================== VISTA SUPERVISOR ==================== -->
+    <section id="viewSupervisor" class="view" aria-labelledby="tituloSupervisor" hidden>
+      <h1 id="tituloSupervisor" class="visually-hidden">Tu saldo y tus solicitudes</h1>
+
+      <section class="card kpi-card surface card-neutral">
+        <div class="kpi-label">Tu saldo disponible</div>
+        <div class="kpi-value" id="saldoNumber">0,0 hs</div>
+        <div class="kpi-sub">Horas extra generadas menos compensadas</div>
+        <div class="kpi-breakdown">
+          <span><span class="dot dot-gen"></span>Generadas <b class="num" id="saldoGeneradas">0,0</b> hs</span>
+          <span><span class="dot dot-comp"></span>Compensadas <b class="num" id="saldoCompensadas">0,0</b> hs</span>
+        </div>
+      </section>
+
+      <div class="actions-row">
+        <button type="button" class="btn btn-primary" id="btnAbrirHE">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+          Cargar horas extra
+        </button>
+        <button type="button" class="btn btn-secondary" id="btnAbrirComp">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/></svg>
+          Pedir compensacion
+        </button>
+      </div>
+
+      <section class="card list-card surface">
+        <div class="section-title"><h2 class="h3">Mis solicitudes</h2></div>
+        <ul class="solicitudes-list" id="listaSolicitudes"><!-- items via JS --></ul>
+      </section>
+
+      <p class="foot-note">VSPT Wine Group · Planta Graffigna · San Juan, Argentina</p>
+    </section>
+
+    <!-- ==================== VISTA JEFE ==================== -->
+    <section id="viewJefe" class="view" aria-labelledby="tituloJefe" hidden>
+      <h1 id="tituloJefe" class="visually-hidden">Pendientes y saldos del equipo</h1>
+
+      <div class="jefe-grid">
+        <div>
+          <div class="jefe-header-row">
+            <div class="section-title"><h2 class="h3">Pendientes</h2><span class="badge-count" id="pendCount">0</span></div>
+          </div>
+          <ul class="pendientes-list" id="listaPendientes"><!-- items via JS --></ul>
+        </div>
+
+        <section class="card equipo-card surface">
+          <div class="section-title"><h2 class="h3">Saldos del equipo</h2></div>
+          <ul class="equipo-list" id="listaEquipo"><!-- items via JS --></ul>
+        </section>
+      </div>
+
+      <p class="foot-note">VSPT Wine Group · Planta Graffigna · San Juan, Argentina</p>
+    </section>
+
+    <!-- ==================== VISTA PERSONAS (solo lectura) ==================== -->
+    <section id="viewPersonas" class="view" aria-labelledby="tituloPersonas" hidden>
+      <h1 id="tituloPersonas" class="visually-hidden">Vista Gerencia de Personas</h1>
+
+      <div class="eyebrow" style="margin-bottom:4px">Gerencia de Personas</div>
+      <div class="h2" style="margin-bottom:14px">Saldos de horas extra — Fraccionamiento</div>
+
+      <div class="kpi-grid">
+        <section class="card kpi-card kpi-mini surface card-neutral">
+          <div class="kpi-label">HE del mes (planta)</div>
+          <div class="kpi-value" id="personasTotalMes">0,0 hs</div>
+          <div class="kpi-sub">Todas las lineas, mes en curso</div>
+        </section>
+        <section class="card kpi-card kpi-mini surface card-atencion">
+          <div class="kpi-label">Pendientes de aprobacion</div>
+          <div class="kpi-value" id="personasPendientes">0</div>
+          <div class="kpi-sub">Esperando al Jefe</div>
+        </section>
+        <section class="card kpi-card kpi-mini surface card-ok">
+          <div class="kpi-label">Saldo acumulado (planta)</div>
+          <div class="kpi-value" id="personasSaldoTotal">0,0 hs</div>
+          <div class="kpi-sub">Generadas menos compensadas</div>
+        </section>
+      </div>
+
+      <section class="card surface">
+        <div class="section-title"><h2 class="h3">Supervisores</h2></div>
+        <div class="tabla-wrap">
+          <table class="tabla">
+            <thead>
+              <tr>
+                <th>Supervisor</th>
+                <th class="num-col">HE del mes</th>
+                <th class="num-col">Compensadas</th>
+                <th class="num-col">Saldo acumulado</th>
+              </tr>
+            </thead>
+            <tbody id="personasTablaBody"><!-- filas via JS --></tbody>
+          </table>
+        </div>
+      </section>
+
+      <p class="foot-note">Vista de consulta — sin acciones de aprobacion ni edicion.</p>
+    </section>
+
+  </div>
+
+  <!-- ==================== MODAL: CARGAR HORAS EXTRA ==================== -->
+  <div class="modal-overlay" id="overlayHE" aria-hidden="true">
+    <div class="modal surface" role="dialog" aria-modal="true" aria-labelledby="tituloModalHE">
+      <div class="modal-header">
+        <h2 id="tituloModalHE" class="h3">Cargar horas extra</h2>
+        <button type="button" class="modal-close" data-close aria-label="Cerrar">
+          <svg class="icon icon-16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+      </div>
+      <form id="formHE" class="modal-body" novalidate>
+        <label>Fecha
+          <input type="date" name="fecha" required>
+        </label>
+        <label>Cantidad de horas
+          <input type="number" name="horas" step="0.5" min="0.5" max="24" placeholder="Ej: 3" required>
+        </label>
+        <label>Linea
+          <select name="linea" required>
+            <option value="">Elegir linea...</option>
+            <option value="L1">L1</option>
+            <option value="L2">L2</option>
+            <option value="L3">L3</option>
+            <option value="Varias">Varias</option>
+          </select>
+        </label>
+        <label>Motivo
+          <textarea name="motivo" rows="3" placeholder="Ej: cierre de lote para despacho de exportacion" required></textarea>
+        </label>
+        <p class="error-msg" id="errorHE" role="alert" hidden>
+          <svg class="icon icon-16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+          <span id="errorHETexto">Error.</span>
+        </p>
+      </form>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-ghost" data-close>Cancelar</button>
+        <button type="submit" class="btn btn-primary" form="formHE" id="btnEnviarHE">Enviar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== MODAL: PEDIR COMPENSACION ==================== -->
+  <div class="modal-overlay" id="overlayComp" aria-hidden="true">
+    <div class="modal surface" role="dialog" aria-modal="true" aria-labelledby="tituloModalComp">
+      <div class="modal-header">
+        <h2 id="tituloModalComp" class="h3">Pedir compensacion</h2>
+        <button type="button" class="modal-close" data-close aria-label="Cerrar">
+          <svg class="icon icon-16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+      </div>
+      <form id="formComp" class="modal-body" novalidate>
+        <label>Fecha solicitada
+          <input type="date" name="fecha" required>
+        </label>
+        <fieldset class="tipo-fieldset">
+          <legend>Tipo</legend>
+          <label class="radio">
+            <input type="radio" name="tipo" value="completo" checked> Dia completo <span class="muted-text">(8 hs)</span>
+          </label>
+          <label class="radio">
+            <input type="radio" name="tipo" value="medio"> Medio dia <span class="muted-text">(4 hs)</span>
+          </label>
+        </fieldset>
+
+        <div class="calc-box" id="compCalcBox">
+          <div class="calc-row"><span>Horas a descontar</span><b class="num" id="compHorasDescontar">8,0 hs</b></div>
+          <div class="calc-row"><span>Saldo actual</span><b class="num" id="compSaldoActual">0,0 hs</b></div>
+          <div class="calc-row calc-result"><span>Saldo resultante</span><b class="num" id="compSaldoResultante">0,0 hs</b></div>
+        </div>
+
+        <p class="error-msg" id="compError" role="alert" hidden>
+          <svg class="icon icon-16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+          <span id="compErrorTexto">Saldo insuficiente: no se puede solicitar mas horas que las disponibles.</span>
+        </p>
+      </form>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-ghost" data-close>Cancelar</button>
+        <button type="submit" class="btn btn-primary" form="formComp" id="btnEnviarComp">Enviar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== EXITO ==================== -->
+  <div class="modal-overlay success-overlay" id="overlaySuccess" aria-hidden="true">
+    <div class="success-panel surface">
+      <svg width="88" height="88" viewBox="0 0 100 100" role="img" aria-label="Enviado con exito">
+        <circle class="success-ripple" cx="50" cy="50" r="42"/>
+        <circle class="success-ring" cx="50" cy="50" r="42"/>
+        <path class="success-check" d="M30 52 L44 66 L72 34"/>
+      </svg>
+      <p class="success-text" id="successText">Solicitud enviada</p>
+    </div>
+  </div>
+</div>
+
+<?!= include('JsApp'); ?>
+</body>
+</html>

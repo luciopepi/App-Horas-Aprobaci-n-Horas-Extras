@@ -16,7 +16,16 @@
  *     cargan a mano en esta hoja.
  *  5. Crear los 2 Google Forms (horas extra y compensacion) y vincular
  *     sus respuestas a este Sheet.
- *  6. Implementar > Nueva implementacion > Aplicacion web
+ *  6. Crear ademas 3 archivos HTML en el mismo proyecto de Apps Script
+ *     (Archivo > Nuevo > Archivo HTML), con estos nombres EXACTOS, y
+ *     pegarles el contenido de webapp/Index.html, webapp/Estilos.html y
+ *     webapp/JsApp.html del repo (Apps Script no tiene subcarpetas: los
+ *     archivos van sueltos, la carpeta "webapp/" es solo organizacion del
+ *     repo):
+ *       - Index.html
+ *       - Estilos.html
+ *       - JsApp.html
+ *  7. Implementar > Nueva implementacion > Aplicacion web
  *       Ejecutar como: YO
  *       Acceso: Cualquier usuario de <dominio de la empresa>
  *     El acceso por dominio (no "cualquier usuario") es lo que hace que
@@ -25,8 +34,11 @@
  *     correo real de quien aprueba en vez de vacio.
  *     "Ejecutar como: YO" evita que cada usuario tenga que aceptar
  *     permisos y que necesite acceso al Sheet.
- *     Copiar la URL y pegarla en CONFIG.WEBAPP_URL.
- *  7. Activadores: onFormSubmitHE  -> Desde hoja de calculo / Al enviar formulario
+ *     Copiar la URL y pegarla en CONFIG.WEBAPP_URL. Esa misma URL, abierta
+ *     sin parametros, es la WebApp (doGet la sirve). Con id+token+accion
+ *     en la URL (los botones del mail) sigue siendo el flujo de aprobacion
+ *     de siempre.
+ *  8. Activadores: onFormSubmitHE  -> Desde hoja de calculo / Al enviar formulario
  *                  resumenMensual  -> Basado en tiempo / Mensual dia 1, 07:00
  *
  * Si se edita la hoja "Correos" (alta, baja, cambio de rol o de activo),
@@ -104,6 +116,56 @@ function _esEmailPlaceholder(email) {
 /** Genera un ID corto extra para evitar colisiones entre altas en el mismo segundo. */
 function _sufijoId() {
   return Utilities.getUuid().slice(0, 4);
+}
+
+/**
+ * Formatea una fecha para mostrarla en un mail o pantalla. El formulario
+ * manda la fecha como texto, pero Sheets suele interpretar esa celda como
+ * fecha real; al releerla con getValues() vuelve como objeto Date, y
+ * concatenarla cruda a un string tira el toString() completo
+ * ("Sun Jul 26 2026 00:00:00 GMT-0300 (hora estandar de Argentina)").
+ * Si el valor es Date, se formatea; si no, se devuelve el texto tal cual.
+ */
+function _fmtFecha(v) {
+  if (v instanceof Date && !isNaN(v.getTime())) {
+    return Utilities.formatDate(v, CONFIG.TZ, 'dd/MM/yyyy');
+  }
+  return String(v || '').trim();
+}
+
+/**
+ * Formatea una cantidad de horas para texto: sin arrastre de coma flotante
+ * (2.0000000001 -> "2"), sin decimales si es un numero entero, con coma
+ * como separador si no. Redondea a 2 decimales antes de decidir el formato.
+ * OJO: es solo para TEXTO (mail, log). El valor numerico que se guarda en
+ * la planilla y se usa para sumar saldo sigue siendo el numero crudo.
+ */
+function _fmtHoras(n) {
+  const num = Math.round((parseFloat(n) || 0) * 100) / 100;
+  if (Number.isInteger(num)) return String(num);
+  return String(num).replace('.', ',');
+}
+
+/**
+ * Identifica al usuario actual por su sesion de Google — NUNCA por datos
+ * que mande el cliente — y valida que tenga uno de los roles permitidos.
+ * Es el unico punto de entrada de autorizacion de toda la API de la
+ * WebApp: toda funcion expuesta a google.script.run tiene que arrancar
+ * llamando a esto. Cortar aca es cortar en todos lados.
+ *
+ * @param {string[]} [rolesPermitidos] si se pasa, exige ademas que el rol
+ *   este en esa lista; si se omite, alcanza con estar identificado.
+ * @returns {{email:string, nombre:string, rol:string}}
+ */
+function _identificar(rolesPermitidos) {
+  const yo = _normEmail(Session.getActiveUser().getEmail());
+  if (!yo) throw new Error('No se pudo identificar tu cuenta. Ingresa con tu cuenta de la empresa.');
+  const rol = rolDe(yo);
+  if (!rol) throw new Error('Tu cuenta no esta habilitada. Pedi que te agreguen al directorio.');
+  if (rolesPermitidos && rolesPermitidos.indexOf(rol) === -1) {
+    throw new Error('Tu rol (' + rol + ') no tiene permiso para esta accion.');
+  }
+  return { email: yo, nombre: nombreDe(yo), rol: rol };
 }
 
 /**
@@ -348,11 +410,6 @@ function onFormSubmitHE(e) {
 }
 
 function _altaHorasExtra(get) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sh = ss.getSheetByName(SH.SOL);
-  const id = 'HE-' + Utilities.formatDate(new Date(), CONFIG.TZ, 'yyMMdd-HHmmss') + '-' + _sufijoId();
-  const token = Utilities.getUuid();
-
   const email      = get('Direccion de correo electronico', 'Email', 'Correo');
   // El nombre no se le pide al supervisor: sale del directorio a partir del
   // email verificado por Google. Un nombre tipeado a mano se escribe distinto
@@ -363,28 +420,56 @@ function _altaHorasExtra(get) {
   const linea      = get('Linea', 'Línea', 'Sector');
   const motivo     = get('Motivo');
 
+  _crearHoraExtra({ supervisor: supervisor, email: email, fecha: fechaHE,
+                     horas: horas, linea: linea, motivo: motivo });
+}
+
+/**
+ * Nucleo de alta de horas extra: escribe la fila en Solicitudes, loguea y
+ * notifica al Jefe. Es la UNICA fuente de verdad del alta — la usan tanto
+ * el formulario (_altaHorasExtra, arriba) como la API de la WebApp
+ * (apiCrearHoraExtra, mas abajo). No duplicar esta logica en otro lado.
+ *
+ * @param {{supervisor:string, email:string, fecha:(string|Date), horas:number, linea:string, motivo:string}} datos
+ * @returns {{id:string}}
+ */
+function _crearHoraExtra(datos) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sh = ss.getSheetByName(SH.SOL);
+  const id = 'HE-' + Utilities.formatDate(new Date(), CONFIG.TZ, 'yyMMdd-HHmmss') + '-' + _sufijoId();
+  const token = Utilities.getUuid();
+
+  const supervisor = datos.supervisor;
+  const email       = datos.email;
+  const fecha       = datos.fecha;           // Date real (API) o texto (form): se guarda tal cual
+  const horas       = parseFloat(datos.horas) || 0;
+  const linea       = datos.linea;
+  const motivo      = datos.motivo;
+  const fechaTexto  = _fmtFecha(fecha);
+  const horasTexto  = _fmtHoras(horas);
+
   // Resolver el destinatario ANTES de escribir la fila: si no hay Jefe
   // configurado en la hoja "Correos", mejor que falle aca (nada se guarda)
   // a que quede una solicitud huerfana: escrita pero sin nadie que la
   // pueda ver ni aprobar.
   const destinatarioJefe = jefeEmail();
 
-  sh.appendRow([id, new Date(), supervisor, email, fechaHE, horas, linea, motivo,
+  sh.appendRow([id, new Date(), supervisor, email, fecha, horas, linea, motivo,
                 'Pendiente', '', '', '', token]);
 
-  _log(id, 'ALTA_HE', email, horas + ' hs - ' + fechaHE);
+  _log(id, 'ALTA_HE', email, horasTexto + ' hs - ' + fechaTexto);
 
   try {
     MailApp.sendEmail({
       to: destinatarioJefe,
-      subject: '[HE Pendiente] ' + supervisor + ' - ' + horas + ' hs - ' + fechaHE,
+      subject: '[HE Pendiente] ' + supervisor + ' - ' + horasTexto + ' hs - ' + fechaTexto,
       htmlBody: _mailAprobacion({
         titulo: 'Solicitud de Horas Extra',
         id: id, token: token, tipo: 'HE',
         filas: [
           ['Supervisor', supervisor],
-          ['Fecha HE', fechaHE],
-          ['Horas', horas],
+          ['Fecha HE', fechaTexto],
+          ['Horas', horasTexto],
           ['Linea / Sector', linea],
           ['Motivo', motivo]
         ]
@@ -395,67 +480,93 @@ function _altaHorasExtra(get) {
     // dejamos traza en Auditoria en vez de perder la solicitud en silencio.
     _log(id, 'ERROR_MAIL', email, 'No se pudo notificar al Jefe: ' + err.message);
   }
+
+  return { id: id };
 }
 
 function _altaCompensacion(get) {
+  const email      = get('Direccion de correo electronico', 'Email', 'Correo');
+  const supervisor = get('Supervisor', 'Nombre') || nombreDe(email);
+  const fecha      = get('Fecha a compensar', 'Fecha solicitada', 'Fecha');
+  const tipo       = get('Tipo') || 'Dia completo';
+  const horas      = parseFloat(get('Horas a compensar').replace(',', '.'));
+
+  _crearCompensacion({ supervisor: supervisor, email: email, fecha: fecha,
+                        tipo: tipo, horas: horas });
+}
+
+/**
+ * Nucleo de alta de compensacion: escribe la fila en Compensaciones,
+ * loguea y notifica al Jefe. Es la UNICA fuente de verdad del alta — la
+ * usan tanto el formulario (_altaCompensacion, arriba) como la API de la
+ * WebApp (apiCrearCompensacion, mas abajo). No duplicar esta logica.
+ *
+ * IMPORTANTE (decision del director): el saldo insuficiente NO bloquea
+ * este alta. La solicitud se guarda igual como Pendiente, con una alerta
+ * bien visible en el mail para que el Jefe decida con criterio (por
+ * ejemplo, adelantar un descanso a cuenta de horas futuras). Auto-rechazar
+ * le sacaba la discrecion al Jefe y, combinado con un email mal escrito,
+ * podia destruir solicitudes validas sin vuelta atras. El bloqueo
+ * reversible (que SI corresponde aca) lo hace apiCrearCompensacion() en la
+ * WebApp, ANTES de llamar a esta funcion — ver comentario alla.
+ *
+ * @param {{supervisor:string, email:string, fecha:(string|Date), tipo:string, horas:number}} datos
+ * @returns {{id:string, saldoOk:boolean}}
+ */
+function _crearCompensacion(datos) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sh = ss.getSheetByName(SH.COMP);
   const id = 'CP-' + Utilities.formatDate(new Date(), CONFIG.TZ, 'yyMMdd-HHmmss') + '-' + _sufijoId();
   const token = Utilities.getUuid();
 
-  const email      = get('Direccion de correo electronico', 'Email', 'Correo');
-  const supervisor = get('Supervisor', 'Nombre') || nombreDe(email);
-  const fecha      = get('Fecha a compensar', 'Fecha solicitada', 'Fecha');
-  const tipo       = get('Tipo') || 'Dia completo';
-  let horas        = parseFloat(get('Horas a compensar').replace(',', '.'));
-  if (!horas) horas = (tipo.toUpperCase().indexOf('MEDIO') >= 0)
+  const supervisor = datos.supervisor;
+  const email = datos.email;
+  const fecha = datos.fecha;
+  const tipo = datos.tipo || 'Dia completo';
+  let horas = parseFloat(datos.horas);
+  if (!horas) horas = (String(tipo).toUpperCase().indexOf('MEDIO') >= 0)
                       ? CONFIG.HORAS_POR_DIA / 2 : CONFIG.HORAS_POR_DIA;
 
+  const fechaTexto = _fmtFecha(fecha);
   const validacion = validarCompensacion(email, horas);
 
-  // Resolver el destinatario ANTES de escribir la fila (ver _altaHorasExtra).
+  // Resolver el destinatario ANTES de escribir la fila (ver _crearHoraExtra).
   const destinatarioJefe = jefeEmail();
 
-  // IMPORTANTE (decision del director): el saldo insuficiente NO bloquea el
-  // alta. La solicitud se guarda igual como Pendiente, con una alerta bien
-  // visible en el mail para que el Jefe decida con criterio (por ejemplo,
-  // adelantar un descanso a cuenta de horas futuras). Auto-rechazar le
-  // sacaba la discrecion al Jefe y, combinado con un email mal escrito,
-  // podia destruir solicitudes validas sin vuelta atras. El bloqueo
-  // reversible (que SI corresponde) lo hace validarCompensacion() en el
-  // submit de la futura WebApp, antes de que la solicitud llegue a existir.
   const alerta = !validacion.ok
     ? '<p style="background:#B00020;color:#fff;font-weight:bold;padding:10px 14px;' +
       'border-radius:4px;margin-bottom:16px">ATENCION: saldo insuficiente ' +
-      '(saldo actual: ' + validacion.saldo.toFixed(1) + ' hs, solicitado ' +
-      horas.toFixed(1) + ' hs). La solicitud quedo guardada igual como ' +
+      '(saldo actual: ' + _fmtHoras(validacion.saldo) + ' hs, solicitado ' +
+      _fmtHoras(horas) + ' hs). La solicitud quedo guardada igual como ' +
       'Pendiente: vos decidis si se aprueba.</p>'
     : '';
 
   sh.appendRow([id, new Date(), supervisor, email, fecha, horas, tipo,
                 'Pendiente', '', '', '', token]);
 
-  _log(id, 'ALTA_COMP', email, horas + ' hs - ' + fecha + (validacion.ok ? '' : ' [SALDO INSUFICIENTE]'));
+  _log(id, 'ALTA_COMP', email, _fmtHoras(horas) + ' hs - ' + fechaTexto + (validacion.ok ? '' : ' [SALDO INSUFICIENTE]'));
 
   try {
     MailApp.sendEmail({
       to: destinatarioJefe,
-      subject: (validacion.ok ? '' : '[SALDO INSUFICIENTE] ') + '[Compensacion Pendiente] ' + supervisor + ' - ' + fecha,
+      subject: (validacion.ok ? '' : '[SALDO INSUFICIENTE] ') + '[Compensacion Pendiente] ' + supervisor + ' - ' + fechaTexto,
       htmlBody: alerta + _mailAprobacion({
         titulo: 'Solicitud de Compensacion',
         id: id, token: token, tipo: 'CP',
         filas: [
           ['Supervisor', supervisor],
-          ['Fecha solicitada', fecha],
+          ['Fecha solicitada', fechaTexto],
           ['Tipo', tipo],
-          ['Horas a descontar', horas],
-          ['Saldo disponible', validacion.saldo.toFixed(1) + ' hs']
+          ['Horas a descontar', _fmtHoras(horas)],
+          ['Saldo disponible', _fmtHoras(validacion.saldo) + ' hs']
         ]
       })
     });
   } catch (err) {
     _log(id, 'ERROR_MAIL', email, 'No se pudo notificar al Jefe: ' + err.message);
   }
+
+  return { id: id, saldoOk: validacion.ok };
 }
 
 // ==================== VALIDACION DE SALDO ====================
@@ -479,17 +590,36 @@ function validarCompensacion(email, horas) {
     return {
       ok: false,
       saldo: saldo,
-      mensaje: 'Saldo insuficiente: disponible ' + saldo.toFixed(1) +
-               ' hs, solicitado ' + horasNum.toFixed(1) + ' hs.'
+      mensaje: 'Saldo insuficiente: disponible ' + _fmtHoras(saldo) +
+               ' hs, solicitado ' + _fmtHoras(horasNum) + ' hs.'
     };
   }
   return { ok: true, saldo: saldo, mensaje: 'Saldo suficiente.' };
 }
 
-// ==================== WEB APP (botones del mail) ====================
+// ==================== WEB APP ====================
+/**
+ * doGet tiene DOS trabajos, ruteados por los parametros de la URL:
+ *
+ *  - CON id+token+accion: es el click en un boton APROBAR/RECHAZAR del
+ *    mail. Todo el bloque de aca abajo (lock, idempotencia, validacion de
+ *    accion, confirmacion de saldo negativo) esta EN PRODUCCION y no se
+ *    toca: solo se le aplico el fix de formato de fecha (dentro de
+ *    _notificarResultado, que ya usaba antes de este cambio).
+ *
+ *  - SIN esos tres parametros: no es un click desde el mail, se sirve la
+ *    WebApp real (la que usan los supervisores/Jefe/Personas a diario).
+ */
 function doGet(e) {
   const p = e.parameter;
-  if (!p.id || !p.token || !p.accion) return _html('Solicitud invalida.', '#B00020');
+
+  if (!p.id || !p.token || !p.accion) {
+    return HtmlService.createTemplateFromFile('Index')
+      .evaluate()
+      .setTitle('Horas Extra - Graffigna')
+      .addMetaTag('viewport', 'width=device-width, initial-scale=1')
+      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+  }
 
   const lock = LockService.getScriptLock();
   let tieneLock = false;
@@ -593,13 +723,15 @@ function _notificarResultado(fila, estado, esComp, enc) {
   const cFecha      = _idx(enc, esComp ? 'Fecha solicitada' : 'Fecha HE');
   const cHoras      = _idx(enc, esComp ? 'Horas a compensar' : 'Horas');
 
-  const supervisor = fila[cSupervisor], email = fila[cEmail], fecha = fila[cFecha], horas = fila[cHoras];
+  const supervisor = fila[cSupervisor], email = fila[cEmail];
+  const fecha = _fmtFecha(fila[cFecha]);
+  const horas = _fmtHoras(fila[cHoras]);
   const asunto = (esComp ? '[Compensacion ' : '[Horas Extra ') + estado + '] ' + fecha;
   const cuerpo =
     '<p>Hola ' + supervisor + ',</p>' +
     '<p>Tu solicitud del <b>' + fecha + '</b> (' + horas + ' hs) fue <b>' +
     estado.toLowerCase() + '</b>.</p>' +
-    '<p>Saldo actual de horas extra: <b>' + saldoSupervisor(email).toFixed(1) + ' hs</b>.</p>' +
+    '<p>Saldo actual de horas extra: <b>' + _fmtHoras(saldoSupervisor(email)) + ' hs</b>.</p>' +
     '<p style="font-size:11px;color:#777">' + CONFIG.NOMBRE_PLANTA + '</p>';
 
   const opciones = { to: email, subject: asunto, htmlBody: cuerpo };
@@ -609,24 +741,32 @@ function _notificarResultado(fila, estado, esComp, enc) {
 }
 
 // ==================== SALDOS ====================
-function saldoSupervisor(email) {
+/**
+ * Suma las horas Aprobadas de UNA hoja (Solicitudes o Compensaciones) para
+ * un email. Bloque comun de saldoSupervisor() y de la API (apiEstado,
+ * _equipoCompleto): antes esta suma estaba duplicada como closure dentro
+ * de saldoSupervisor(); se extrajo aca para no repetirla.
+ */
+function _sumaAprobadas(hoja, email) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const buscado = _normEmail(email);
-  let saldo = 0;
-  const acum = (hoja, signo) => {
-    const d = ss.getSheetByName(hoja).getDataRange().getValues();
-    if (d.length < 2) return;
-    const enc = d[0];
-    const cEmail  = _idx(enc, 'Email');
-    const cEstado = _idx(enc, 'Estado');
-    const cHoras  = _idx(enc, hoja === SH.SOL ? 'Horas' : 'Horas a compensar');
-    for (let i = 1; i < d.length; i++)
-      if (_normEmail(d[i][cEmail]) === buscado && d[i][cEstado] === 'Aprobada')
-        saldo += signo * (parseFloat(d[i][cHoras]) || 0);
-  };
-  acum(SH.SOL, 1);
-  acum(SH.COMP, -1);
-  return saldo;
+  const d = ss.getSheetByName(hoja).getDataRange().getValues();
+  if (d.length < 2) return 0;
+  const enc = d[0];
+  const cEmail  = _idx(enc, 'Email');
+  const cEstado = _idx(enc, 'Estado');
+  const cHoras  = _idx(enc, hoja === SH.SOL ? 'Horas' : 'Horas a compensar');
+  let total = 0;
+  for (let i = 1; i < d.length; i++) {
+    if (_normEmail(d[i][cEmail]) === buscado && d[i][cEstado] === 'Aprobada') {
+      total += parseFloat(d[i][cHoras]) || 0;
+    }
+  }
+  return total;
+}
+
+function saldoSupervisor(email) {
+  return _sumaAprobadas(SH.SOL, email) - _sumaAprobadas(SH.COMP, email);
 }
 
 function tablaSaldos() {
@@ -692,8 +832,8 @@ function resumenMensual() {
 
   let filas = '';
   Object.keys(det).sort().forEach(n => {
-    const saldoAcumulado = saldoPorNombre.hasOwnProperty(n) ? saldoPorNombre[n].toFixed(1) : '-';
-    filas += '<tr><td>' + n + '</td><td style="text-align:right">' + det[n].toFixed(1) +
+    const saldoAcumulado = saldoPorNombre.hasOwnProperty(n) ? _fmtHoras(saldoPorNombre[n]) : '-';
+    filas += '<tr><td>' + n + '</td><td style="text-align:right">' + _fmtHoras(det[n]) +
              '</td><td style="text-align:right">' + saldoAcumulado + '</td></tr>';
   });
 
@@ -706,7 +846,7 @@ function resumenMensual() {
     '<th align="right">HE del mes</th><th align="right">Saldo acumulado</th></tr>' +
     filas +
     '<tr style="font-weight:bold;background:#F2EDE4"><td>TOTAL</td>' +
-    '<td align="right">' + total.toFixed(1) + '</td><td></td></tr></table>' +
+    '<td align="right">' + _fmtHoras(total) + '</td><td></td></tr></table>' +
     (pend ? '<p style="color:#B00020">Solicitudes pendientes de aprobacion: ' + pend + '</p>' : '') +
     '</div>';
 
@@ -714,6 +854,370 @@ function resumenMensual() {
   const cc = personasEmails();
   if (cc) opciones.cc = cc;
   MailApp.sendEmail(opciones);
+}
+
+// ==================== API DE LA WEBAPP (google.script.run) ====================
+/**
+ * CRITICO DE SEGURIDAD: la WebApp corre con executeAs=USER_DEPLOYING y
+ * access=DOMAIN. El script tiene permisos totales sobre el Sheet sin
+ * importar quien este del otro lado. Por eso TODA funcion expuesta ac
+ * abajo arranca llamando a _identificar(), que resuelve el rol por la
+ * SESION de Google (nunca por un parametro que mande el cliente), y
+ * ademas cada lectura se filtra en el SERVIDOR por ese email/rol. El
+ * cliente nunca decide que datos le corresponden ver ni que puede hacer.
+ */
+
+/**
+ * Filas de una hoja (Solicitudes o Compensaciones) que pertenecen a un
+ * email, como objetos {NombreDeColumna: valor}. Filtra siempre en el
+ * SERVIDOR: se usa para que un Supervisor solo pueda ver lo suyo.
+ */
+function _filasDe(hoja, email) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const buscado = _normEmail(email);
+  const d = ss.getSheetByName(hoja).getDataRange().getValues();
+  if (d.length < 2) return [];
+  const enc = d[0];
+  const cEmail = _idx(enc, 'Email');
+  const filas = [];
+  for (let i = 1; i < d.length; i++) {
+    if (_normEmail(d[i][cEmail]) !== buscado) continue;
+    const obj = {};
+    enc.forEach(function (nombreCol, c) { obj[nombreCol] = d[i][c]; });
+    filas.push(obj);
+  }
+  return filas;
+}
+
+/** HE aprobadas de un email dentro del mes calendario en curso (para el KPI "HE del mes"). */
+function _heDelMes(email) {
+  const hoy = new Date();
+  const ini = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+  const fin = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0, 23, 59, 59);
+  const buscado = _normEmail(email);
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const d = ss.getSheetByName(SH.SOL).getDataRange().getValues();
+  if (d.length < 2) return 0;
+  const enc = d[0];
+  const cEmail = _idx(enc, 'Email');
+  const cEstado = _idx(enc, 'Estado');
+  const cHoras = _idx(enc, 'Horas');
+  const cTimestamp = _idx(enc, 'Timestamp');
+  let total = 0;
+  for (let i = 1; i < d.length; i++) {
+    if (_normEmail(d[i][cEmail]) !== buscado) continue;
+    if (d[i][cEstado] !== 'Aprobada') continue;
+    const ts = new Date(d[i][cTimestamp]);
+    if (ts < ini || ts > fin) continue;
+    total += parseFloat(d[i][cHoras]) || 0;
+  }
+  return total;
+}
+
+/** Todas las solicitudes Pendientes (HE y Compensacion) para la bandeja del Jefe. */
+function _pendientesParaJefe() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const lista = [];
+
+  const sol = ss.getSheetByName(SH.SOL).getDataRange().getValues();
+  if (sol.length >= 2) {
+    const enc = sol[0];
+    const cId = _idx(enc, 'ID'), cSup = _idx(enc, 'Supervisor'), cEmail = _idx(enc, 'Email'),
+          cFecha = _idx(enc, 'Fecha HE'), cHoras = _idx(enc, 'Horas'), cLinea = _idx(enc, 'Linea'),
+          cMotivo = _idx(enc, 'Motivo'), cEstado = _idx(enc, 'Estado');
+    for (let i = 1; i < sol.length; i++) {
+      if (sol[i][cEstado] !== 'Pendiente') continue;
+      lista.push({
+        id: sol[i][cId], tipo: 'HE', nombre: sol[i][cSup], email: _normEmail(sol[i][cEmail]),
+        fecha: _fmtFecha(sol[i][cFecha]), horas: parseFloat(sol[i][cHoras]) || 0,
+        linea: sol[i][cLinea], motivo: sol[i][cMotivo]
+      });
+    }
+  }
+
+  const comp = ss.getSheetByName(SH.COMP).getDataRange().getValues();
+  if (comp.length >= 2) {
+    const enc = comp[0];
+    const cId = _idx(enc, 'ID'), cSup = _idx(enc, 'Supervisor'), cEmail = _idx(enc, 'Email'),
+          cFecha = _idx(enc, 'Fecha solicitada'), cHoras = _idx(enc, 'Horas a compensar'),
+          cTipo = _idx(enc, 'Tipo'), cEstado = _idx(enc, 'Estado');
+    for (let i = 1; i < comp.length; i++) {
+      if (comp[i][cEstado] !== 'Pendiente') continue;
+      lista.push({
+        id: comp[i][cId], tipo: 'CP', nombre: comp[i][cSup], email: _normEmail(comp[i][cEmail]),
+        fecha: _fmtFecha(comp[i][cFecha]), horas: parseFloat(comp[i][cHoras]) || 0,
+        linea: '-', motivo: 'Compensacion - ' + comp[i][cTipo]
+      });
+    }
+  }
+
+  lista.sort(function (a, b) { return a.id < b.id ? 1 : -1; }); // mas nuevo primero (el ID trae fecha-hora)
+  return lista;
+}
+
+/** Saldo/HE-del-mes de todos los Supervisores activos del directorio, para las vistas de Jefe y Personas. */
+function _equipoCompleto() {
+  return _directorio()
+    .filter(function (p) { return p.rol === 'Supervisor'; })
+    .map(function (p) {
+      const generadas = _sumaAprobadas(SH.SOL, p.email);
+      const compensadas = _sumaAprobadas(SH.COMP, p.email);
+      return {
+        nombre: p.nombre,
+        email: p.email,
+        generadas: generadas,
+        compensadas: compensadas,
+        saldo: generadas - compensadas,
+        heDelMes: _heDelMes(p.email)
+      };
+    })
+    .sort(function (a, b) { return b.saldo - a.saldo; });
+}
+
+/** Convierte "yyyy-mm-dd" (lo que manda un <input type="date">) a un Date real. */
+function _parsearFechaInput(valor) {
+  const s = String(valor || '').trim();
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if (!m) throw new Error('Fecha invalida.');
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  if (isNaN(d.getTime())) throw new Error('Fecha invalida.');
+  return d;
+}
+
+function _validarFechaNoFutura(fecha) {
+  const finDeHoy = new Date();
+  finDeHoy.setHours(23, 59, 59, 999);
+  if (fecha.getTime() > finDeHoy.getTime()) {
+    throw new Error('La fecha de las horas extra no puede ser futura.');
+  }
+}
+
+/**
+ * Estado completo para la pantalla principal de la WebApp. Los datos que
+ * devuelve dependen del rol de quien pregunta (resuelto por sesion, no por
+ * el cliente): un Supervisor jamas recibe datos de otro supervisor.
+ */
+function apiEstado() {
+  const yo = _identificar();
+  const resultado = { yo: yo };
+
+  // Los datos propios se calculan para CUALQUIER rol, no solo Supervisor.
+  // Un Jefe tambien puede cargar horas extra (apiCrearHoraExtra se lo
+  // permite), y si no le devolvieramos su saldo cargaria horas que despues
+  // no ve por ningun lado. No hay riesgo de privacidad: son sus propios
+  // datos, filtrados por el email de su sesion.
+  const generadas = _sumaAprobadas(SH.SOL, yo.email);
+  const compensadas = _sumaAprobadas(SH.COMP, yo.email);
+
+  resultado.misSolicitudes = _filasDe(SH.SOL, yo.email).map(function (f) {
+    return {
+      id: f.ID, fecha: _fmtFecha(f['Fecha HE']), horas: parseFloat(f.Horas) || 0,
+      linea: f.Linea, motivo: f.Motivo, estado: f.Estado
+    };
+  }).sort(function (a, b) { return a.id < b.id ? 1 : -1; });
+
+  resultado.misCompensaciones = _filasDe(SH.COMP, yo.email).map(function (f) {
+    return {
+      id: f.ID, fecha: _fmtFecha(f['Fecha solicitada']), horas: parseFloat(f['Horas a compensar']) || 0,
+      tipo: f.Tipo, estado: f.Estado
+    };
+  }).sort(function (a, b) { return a.id < b.id ? 1 : -1; });
+
+  resultado.saldo = { generadas: generadas, compensadas: compensadas, disponible: generadas - compensadas };
+
+  // El bloque personal se muestra siempre a los Supervisores (aunque este
+  // en cero: es su pantalla principal) y, para los demas roles, solo si
+  // tienen actividad real. Asi Gerencia de Personas no ve un saldo vacio
+  // que no le corresponde, pero el Jefe si ve el suyo cuando carga horas.
+  resultado.mostrarPanelPersonal = (yo.rol === 'Supervisor') ||
+    resultado.misSolicitudes.length > 0 || resultado.misCompensaciones.length > 0;
+
+  let pendientesCompletos = null;
+  if (yo.rol === 'Jefe') {
+    pendientesCompletos = _pendientesParaJefe();
+    resultado.pendientes = pendientesCompletos;
+  }
+
+  if (yo.rol === 'Jefe' || yo.rol === 'Personas') {
+    const equipo = _equipoCompleto();
+    if (!pendientesCompletos) pendientesCompletos = _pendientesParaJefe();
+    resultado.equipo = equipo;
+    resultado.totales = {
+      heDelMes: equipo.reduce(function (acc, p) { return acc + p.heDelMes; }, 0),
+      pendientes: pendientesCompletos.length,
+      saldoTotal: equipo.reduce(function (acc, p) { return acc + p.saldo; }, 0)
+    };
+  }
+
+  return resultado;
+}
+
+/**
+ * Alta de horas extra desde la WebApp. Rol Supervisor o Jefe. El email
+ * SIEMPRE es el de la sesion (yo.email) — nunca uno que mande el cliente.
+ * Reutiliza _crearHoraExtra(), el mismo nucleo que usa el formulario, asi
+ * que el ID, el token, el log de Auditoria y el mail al Jefe salen
+ * identicos por los dos caminos.
+ */
+function apiCrearHoraExtra(payload) {
+  const yo = _identificar(['Supervisor', 'Jefe']);
+  payload = payload || {};
+
+  const fecha = _parsearFechaInput(payload.fecha);
+  _validarFechaNoFutura(fecha);
+
+  const horas = parseFloat(String(payload.horas == null ? '' : payload.horas).replace(',', '.'));
+  if (!horas || horas < 0.5 || horas > 24) {
+    throw new Error('La cantidad de horas tiene que ser un numero entre 0,5 y 24.');
+  }
+
+  const linea = String(payload.linea || '').trim();
+  if (['L1', 'L2', 'L3', 'Varias'].indexOf(linea) === -1) {
+    throw new Error('Linea invalida: elegi L1, L2, L3 o Varias.');
+  }
+
+  const motivo = String(payload.motivo || '').trim();
+  if (!motivo) throw new Error('El motivo no puede estar vacio.');
+
+  const r = _crearHoraExtra({
+    supervisor: yo.nombre, email: yo.email, fecha: fecha,
+    horas: horas, linea: linea, motivo: motivo
+  });
+  return { ok: true, id: r.id };
+}
+
+/**
+ * Alta de compensacion desde la WebApp. Rol Supervisor o Jefe.
+ *
+ * ACA SI SE BLOQUEA POR SALDO — es el UNICO lugar donde corresponde,
+ * porque es reversible: el usuario ve el error, corrige y reenvia, no se
+ * pierde nada. El alta por FORMULARIO (_altaCompensacion/_crearCompensacion)
+ * sigue sin bloquear a proposito: son dos caminos con reglas distintas,
+ * no se unifican (ver comentario en _crearCompensacion).
+ *
+ * El tipo lo manda el cliente pero las HORAS las calcula el SERVIDOR a
+ * partir del tipo (nunca confiamos en un numero de horas que mande el
+ * cliente para esto: dejaria manipular el saldo con un payload armado a
+ * mano).
+ */
+function apiCrearCompensacion(payload) {
+  const yo = _identificar(['Supervisor', 'Jefe']);
+  payload = payload || {};
+
+  const fecha = _parsearFechaInput(payload.fecha);
+
+  const tipoCrudo = String(payload.tipo || '').trim().toLowerCase();
+  let tipo, horas;
+  if (tipoCrudo === 'medio') {
+    tipo = 'Medio dia';
+    horas = CONFIG.HORAS_POR_DIA / 2;
+  } else if (tipoCrudo === 'completo') {
+    tipo = 'Dia completo';
+    horas = CONFIG.HORAS_POR_DIA;
+  } else {
+    throw new Error('Tipo de compensacion invalido.');
+  }
+
+  const validacion = validarCompensacion(yo.email, horas);
+  if (!validacion.ok) {
+    throw new Error(validacion.mensaje);
+  }
+
+  const r = _crearCompensacion({
+    supervisor: yo.nombre, email: yo.email, fecha: fecha, tipo: tipo, horas: horas
+  });
+  return { ok: true, id: r.id };
+}
+
+/**
+ * Aprueba o rechaza una solicitud desde la WebApp. SOLO rol Jefe.
+ * Mismas garantias que el flujo de doGet (que no se toca): LockService,
+ * idempotencia, registro en Auditoria con el email real (de la sesion,
+ * nunca del cliente) y mail de resultado al supervisor con copia a
+ * Personas. Es una implementacion INDEPENDIENTE de la de doGet a
+ * proposito: doGet identifica al Jefe por un link con token publico (a
+ * veces sin sesion), esta funcion siempre tiene sesion real porque
+ * google.script.run no funciona sin ella. Compartir codigo entre las dos
+ * hubiera significado tocar el doGet que esta en produccion.
+ *
+ * @param {string} id
+ * @param {string} accion 'aprobar' | 'rechazar'
+ * @param {boolean} [confirmar] solo compensaciones con saldo insuficiente:
+ *   hace falta un segundo llamado con confirmar=true para aprobar "en
+ *   descubierto". Sin eso, devuelve {ok:false, requiereConfirmacion:true}.
+ */
+function apiResolver(id, accion, confirmar) {
+  const yo = _identificar(['Jefe']);
+
+  id = String(id || '');
+  if (!id) throw new Error('Falta el ID de la solicitud.');
+  if (accion !== 'aprobar' && accion !== 'rechazar') {
+    throw new Error('Accion invalida.');
+  }
+
+  const lock = LockService.getScriptLock();
+  let tieneLock = false;
+  try {
+    tieneLock = lock.tryLock(10000);
+  } catch (err) {
+    tieneLock = false;
+  }
+  if (!tieneLock) {
+    throw new Error('El sistema esta ocupado procesando otra solicitud. Intenta de nuevo en unos segundos.');
+  }
+
+  try {
+    const esComp = id.indexOf('CP-') === 0;
+    const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(esComp ? SH.COMP : SH.SOL);
+    const data = sh.getDataRange().getValues();
+    if (data.length < 2) throw new Error('No se encontro la solicitud.');
+
+    const enc = data[0];
+    const cId    = _idx(enc, 'ID');
+    const cEst   = _idx(enc, 'Estado');
+    const cApr   = _idx(enc, 'Aprobado por');
+    const cFec   = _idx(enc, 'Fecha aprobacion');
+    const cEmail = _idx(enc, 'Email');
+    const cHoras = _idx(enc, esComp ? 'Horas a compensar' : 'Horas');
+
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][cId] !== id) continue;
+      if (data[i][cEst] !== 'Pendiente') {
+        throw new Error('Esta solicitud ya fue procesada (' + data[i][cEst] + ').');
+      }
+
+      const estado = (accion === 'aprobar') ? 'Aprobada' : 'Rechazada';
+      let saldoNegativoConfirmado = false;
+
+      if (esComp && estado === 'Aprobada') {
+        const validacion = validarCompensacion(data[i][cEmail], parseFloat(data[i][cHoras]) || 0);
+        if (!validacion.ok) {
+          if (!confirmar) {
+            // No es un error: es un estado intermedio que el cliente
+            // muestra como "confirmar aprobacion en descubierto".
+            return { ok: false, requiereConfirmacion: true, mensaje: validacion.mensaje };
+          }
+          saldoNegativoConfirmado = true;
+        }
+      }
+
+      sh.getRange(i + 1, cEst + 1).setValue(estado);
+      sh.getRange(i + 1, cApr + 1).setValue(yo.email);
+      sh.getRange(i + 1, cFec + 1).setValue(new Date());
+
+      _log(id, estado.toUpperCase(), yo.email, '');
+      if (saldoNegativoConfirmado) {
+        _log(id, 'APROBADA_SALDO_NEGATIVO', yo.email,
+             'Aprobada con saldo insuficiente, confirmado explicitamente por el Jefe desde la WebApp.');
+      }
+      _notificarResultado(data[i], estado, esComp, enc);
+
+      return { ok: true, id: id, estado: estado };
+    }
+    throw new Error('No se encontro la solicitud.');
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 // ==================== AUXILIARES ====================

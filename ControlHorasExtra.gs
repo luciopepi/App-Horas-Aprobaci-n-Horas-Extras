@@ -52,7 +52,15 @@ const CONFIG = {
   WEBAPP_URL:    'https://script.google.com/macros/s/XXXX/exec', // <-- pegar tras implementar
   NOMBRE_PLANTA: 'Planta Graffigna - Fraccionamiento',
   HORAS_POR_DIA: 8,        // equivalencia para compensacion en dias
-  TZ:            'America/Argentina/San_Juan'
+  TZ:            'America/Argentina/San_Juan',
+
+  // Icono de la app: es el que usa Chrome para el acceso directo que queda
+  // en la pantalla del celular. Si queda vacio, Android muestra un icono
+  // generico. Tiene que ser una URL PUBLICA a una imagen (Apps Script no
+  // acepta data URI aca). El archivo esta en webapp/assets/icono-192.png:
+  // subilo a Drive, compartilo como "cualquier persona con el enlace" y
+  // pega aca el enlace directo. Ver el README, seccion "Icono".
+  ICONO_URL:     ''
 };
 
 const SH = { SOL: 'Solicitudes', COMP: 'Compensaciones', LOG: 'Auditoria', COR: 'Correos' };
@@ -614,11 +622,20 @@ function doGet(e) {
   const p = e.parameter;
 
   if (!p.id || !p.token || !p.accion) {
-    return HtmlService.createTemplateFromFile('Index')
+    const pagina = HtmlService.createTemplateFromFile('Index')
       .evaluate()
-      .setTitle('Horas Extra - Graffigna')
+      // El titulo es el nombre que Android le propone al acceso directo
+      // cuando lo agregan a la pantalla de inicio. Corto a proposito: los
+      // nombres largos se truncan con puntos suspensivos abajo del icono.
+      .setTitle('Horas Extra')
       .addMetaTag('viewport', 'width=device-width, initial-scale=1')
       .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+
+    // Solo si hay un icono cargado: pasar una URL vacia o invalida deja el
+    // acceso directo con un icono roto, que es peor que el generico.
+    if (CONFIG.ICONO_URL) pagina.setFaviconUrl(CONFIG.ICONO_URL);
+
+    return pagina;
   }
 
   const lock = LockService.getScriptLock();

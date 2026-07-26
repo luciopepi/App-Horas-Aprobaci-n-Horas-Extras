@@ -17,7 +17,14 @@
  *  5. Crear los 2 Google Forms (horas extra y compensacion) y vincular
  *     sus respuestas a este Sheet.
  *  6. Implementar > Nueva implementacion > Aplicacion web
- *       Ejecutar como: YO   |   Acceso: Cualquier usuario
+ *       Ejecutar como: YO
+ *       Acceso: Cualquier usuario de <dominio de la empresa>
+ *     El acceso por dominio (no "cualquier usuario") es lo que hace que
+ *     Google bloquee el login de cuentas ajenas antes de cargar la app, y
+ *     lo que hace que Session.getActiveUser().getEmail() devuelva el
+ *     correo real de quien aprueba en vez de vacio.
+ *     "Ejecutar como: YO" evita que cada usuario tenga que aceptar
+ *     permisos y que necesite acceso al Sheet.
  *     Copiar la URL y pegarla en CONFIG.WEBAPP_URL.
  *  7. Activadores: onFormSubmitHE  -> Desde hoja de calculo / Al enviar formulario
  *                  resumenMensual  -> Basado en tiempo / Mensual dia 1, 07:00

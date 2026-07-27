@@ -55,11 +55,13 @@ const CONFIG = {
   TZ:            'America/Argentina/San_Juan',
 
   // Icono de la app: es el que usa Chrome para el acceso directo que queda
-  // en la pantalla del celular. Si queda vacio, Android muestra un icono
-  // generico. Tiene que ser una URL PUBLICA a una imagen (Apps Script no
-  // acepta data URI aca). El archivo esta en webapp/assets/icono-192.png:
-  // subilo a Drive, compartilo como "cualquier persona con el enlace" y
-  // pega aca el enlace directo. Ver el README, seccion "Icono".
+  // en la pantalla del celular. Si queda vacio, Android muestra uno
+  // generico y la app funciona igual.
+  // Tiene que ser una URL PUBLICA a una imagen; Apps Script no acepta data
+  // URI aca. Para obtenerla: subir el PNG a Drive, compartirlo como
+  // "cualquier persona con el enlace" y armar el enlace directo con el ID
+  // del archivo. Pendiente: definir el icono a partir del logo
+  // institucional (ver README, seccion "Icono").
   ICONO_URL:     ''
 };
 

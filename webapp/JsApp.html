@@ -148,9 +148,9 @@
       var data = await llamarServidor('apiEstado');
       estadoActual = data;
       mostrarVista(data.yo.rol);
-      if (data.yo.rol === 'Supervisor') renderSupervisor(data);
-      if (data.yo.rol === 'Jefe') renderJefe(data);
-      if (data.yo.rol === 'Personas') renderPersonas(data);
+      if (data.yo.rol === 'Supervisor') { renderSupervisor(data); calSupervisor.recargarActual(); }
+      if (data.yo.rol === 'Jefe') { renderJefe(data); calJefe.recargarActual(); }
+      if (data.yo.rol === 'Personas') { renderPersonas(data); calPersonas.recargarActual(); }
 
       // El Jefe tambien puede cargar horas extra propias. Si tiene
       // actividad, ademas de su bandeja de pendientes ve su panel
@@ -161,6 +161,7 @@
         panel.hidden = false;
         panel.classList.add('active');
         renderSupervisor(data);
+        calSupervisor.recargarActual();
       }
     } catch (err) {
       mostrarError(err);
@@ -458,6 +459,200 @@
     abrirModal(overlaySuccess);
     setTimeout(function () { cerrarModal(overlaySuccess); }, 1500);
   }
+
+  /* ==================== CALENDARIO ==================== */
+  var MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio',
+    'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+  var DIAS_SEMANA_CORTO = ['LUN', 'MAR', 'MIE', 'JUE', 'VIE', 'SAB', 'DOM'];
+  var DIAS_SEMANA_LARGO = ['Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', 'Sabado', 'Domingo'];
+
+  // JS da 0=domingo..6=sabado. Aca se usa semana que arranca en lunes, asi
+  // que se rota: 0=lunes..6=domingo.
+  function primerDiaSemanaLunes(anio, mesIdx0) {
+    return (new Date(anio, mesIdx0, 1).getDay() + 6) % 7;
+  }
+  function diasEnMes(anio, mesIdx0) {
+    return new Date(anio, mesIdx0 + 1, 0).getDate();
+  }
+
+  // Precedencia del estado de un dia: si tiene algo pendiente es lo que
+  // mas urge verlo (amber); si no, y tiene algo aprobado, esta resuelto
+  // (olive); si el dia solo tiene rechazadas, totalHoras da 0 pero el
+  // Jefe igual quiere poder entrar a ver que paso (crimson).
+  function estadoDia(diaInfo) {
+    if (!diaInfo) return 'is-vacio';
+    if (diaInfo.horasPendientes > 0) return 'is-pendiente';
+    if (diaInfo.horasAprobadas > 0) return 'is-ok';
+    return 'is-rechazada';
+  }
+
+  function calSkeletonHTML() {
+    return '<div class="cal-skeleton">' +
+      '<div class="sk-line" style="width:55%;height:11px"></div>' +
+      '<div class="sk-line" style="width:100%;height:180px"></div>' +
+      '</div>';
+  }
+  function calErrorHTML(msg) {
+    return '<div class="estado-vacio">' + svgIcon('alertTriangle', 'icon-32') +
+      '<strong>No pudimos cargar el calendario</strong><span>' + esc(msg) + '</span></div>';
+  }
+  function calVacioHTML() {
+    return '<div class="estado-vacio">' + svgIcon('calendar', 'icon-32') +
+      '<strong>No hubo horas extra en este mes</strong><span>Elegi otro mes con las flechas de arriba.</span></div>';
+  }
+
+  // Una tarjeta de calendario por vista (Supervisor/Jefe/Personas). La
+  // funcion ya devuelve datos con alcance por rol resuelto en el
+  // servidor, asi que las tres instancias solo difieren en el prefijo de
+  // sus IDs en el DOM.
+  function crearCalendario(prefijo) {
+    var elTitulo = document.getElementById(prefijo + 'Titulo');
+    var elBody = document.getElementById(prefijo + 'Body');
+    var elPrev = document.getElementById(prefijo + 'Prev');
+    var elNext = document.getElementById(prefijo + 'Next');
+
+    var hoy = new Date();
+    var estado = { anio: hoy.getFullYear(), mes: hoy.getMonth() + 1 };
+    var cargando = false;
+
+    function render(data) {
+      elTitulo.textContent = MESES[data.mes - 1] + ' ' + data.anio;
+
+      var porDia = {};
+      (data.dias || []).forEach(function (d) { porDia[d.dia] = d; });
+
+      var offset = primerDiaSemanaLunes(data.anio, data.mes - 1);
+      var totalDias = diasEnMes(data.anio, data.mes - 1);
+      var esMesActual = data.anio === hoy.getFullYear() && data.mes === hoy.getMonth() + 1;
+
+      var celdas = '';
+      for (var i = 0; i < offset; i++) celdas += '<div class="cal-day-blank" aria-hidden="true"></div>';
+      for (var dia = 1; dia <= totalDias; dia++) {
+        var info = porDia[dia];
+        var esHoy = esMesActual && dia === hoy.getDate();
+        var clases = 'cal-day ' + estadoDia(info) + (esHoy ? ' is-hoy' : '');
+        if (info) {
+          var nSolic = info.detalle.length;
+          var etiqueta;
+          if (info.horasPendientes > 0) etiqueta = fmt(info.totalHoras) + ' horas, con pendientes';
+          else if (info.horasAprobadas > 0) etiqueta = fmt(info.totalHoras) + ' horas aprobadas';
+          else etiqueta = 'sin horas aprobadas ni pendientes, rechazada';
+          var aria = dia + ' de ' + MESES[data.mes - 1].toLowerCase() + ', ' + etiqueta + ', ' +
+            nSolic + (nSolic === 1 ? ' solicitud' : ' solicitudes');
+          celdas += '<button type="button" class="' + clases + '" data-dia="' + dia + '" aria-label="' + esc(aria) + '">' +
+            '<span class="cal-day-num">' + dia + '</span>' +
+            (info.totalHoras > 0 ? '<span class="cal-day-horas num">' + fmt(info.totalHoras) + '</span>' : '') +
+            '<span class="cal-day-dot" aria-hidden="true"></span>' +
+            '</button>';
+        } else {
+          celdas += '<div class="' + clases + '"><span class="cal-day-num">' + dia + '</span></div>';
+        }
+      }
+      var totalCeldas = offset + totalDias;
+      var sobran = (7 - (totalCeldas % 7)) % 7;
+      for (var j = 0; j < sobran; j++) celdas += '<div class="cal-day-blank" aria-hidden="true"></div>';
+
+      var weekdayHTML = DIAS_SEMANA_CORTO.map(function (d) { return '<div class="cal-weekday">' + d + '</div>'; }).join('');
+
+      var resumenHTML = '';
+      if (data.totalMes > 0) {
+        var maxHoras = Math.max.apply(null, (data.porSupervisor || []).map(function (p) { return p.horas; }).concat([1]));
+        var filasSup = (data.porSupervisor || []).map(function (p, i) {
+          var pct = maxHoras > 0 ? Math.max(4, Math.round((p.horas / maxHoras) * 100)) : 4;
+          return '<li class="equipo-item" style="--i:' + i + '">' +
+            '<div class="equipo-info">' + svgIcon('user', 'icon-16') + '<strong>' + esc(p.nombre) + '</strong></div>' +
+            '<div class="equipo-bar-track"><div class="equipo-bar" style="--pct:' + pct + '%"></div></div>' +
+            '<span class="equipo-saldo num">' + fmt(p.horas) + ' hs</span>' +
+            '</li>';
+        }).join('');
+        resumenHTML =
+          '<div class="cal-resumen">' +
+            '<div class="cal-resumen-total"><span class="eyebrow">Total del mes</span><b class="num">' + fmt(data.totalMes) + ' hs</b></div>' +
+            '<ul class="equipo-list">' + filasSup + '</ul>' +
+          '</div>';
+      }
+
+      var vacioMes = !data.dias || !data.dias.length;
+      elBody.innerHTML = '<div class="cal-grid">' + weekdayHTML + celdas + '</div>' +
+        (vacioMes ? calVacioHTML() : resumenHTML);
+
+      elBody.querySelectorAll('.cal-day[data-dia]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var d = porDia[Number(btn.dataset.dia)];
+          if (d) abrirDetalleDia(data, d);
+        });
+      });
+    }
+
+    async function cargar(anio, mes) {
+      if (cargando) return;
+      cargando = true;
+      elBody.innerHTML = calSkeletonHTML();
+      elPrev.disabled = true;
+      elNext.disabled = true;
+      try {
+        var data = await llamarServidor('apiCalendario', anio, mes);
+        estado.anio = data.anio;
+        estado.mes = data.mes;
+        render(data);
+      } catch (err) {
+        elTitulo.textContent = MESES[mes - 1] + ' ' + anio;
+        elBody.innerHTML = calErrorHTML(err.message || 'No se pudo conectar con el servidor.');
+      } finally {
+        cargando = false;
+        elPrev.disabled = false;
+        elNext.disabled = false;
+      }
+    }
+
+    elPrev.addEventListener('click', function () {
+      var m = estado.mes - 1, a = estado.anio;
+      if (m < 1) { m = 12; a -= 1; }
+      cargar(a, m);
+    });
+    elNext.addEventListener('click', function () {
+      var m = estado.mes + 1, a = estado.anio;
+      if (m > 12) { m = 1; a += 1; }
+      cargar(a, m);
+    });
+
+    return {
+      // Vuelve a pedir del servidor el mes que se este mirando ahora
+      // mismo (no siempre el actual: si el usuario navego a otro mes y
+      // despues aprueba/carga algo, no le queremos resetear la vista).
+      recargarActual: function () { cargar(estado.anio, estado.mes); }
+    };
+  }
+
+  var overlayCalDia = document.getElementById('overlayCalDia');
+  var tituloModalCalDia = document.getElementById('tituloModalCalDia');
+  var calDiaTablaBody = document.getElementById('calDiaTablaBody');
+  var calDiaTotal = document.getElementById('calDiaTotal');
+
+  function abrirDetalleDia(data, diaInfo) {
+    var fechaObj = new Date(data.anio, data.mes - 1, diaInfo.dia);
+    var nombreDiaSemana = DIAS_SEMANA_LARGO[(fechaObj.getDay() + 6) % 7];
+    tituloModalCalDia.textContent = nombreDiaSemana + ' ' + diaInfo.dia + ' de ' +
+      MESES[data.mes - 1].toLowerCase() + ' de ' + data.anio;
+
+    calDiaTablaBody.innerHTML = diaInfo.detalle.map(function (r) {
+      var info = chipInfo(r.estado);
+      return '<tr>' +
+        '<td><span class="persona-cell">' + svgIcon('user', 'icon-14') + esc(r.supervisor) + '</span></td>' +
+        '<td class="num-col num">' + fmt(r.horas) + ' hs</td>' +
+        '<td>' + esc(r.linea) + '</td>' +
+        '<td class="motivo-cell">' + esc(r.motivo) + '</td>' +
+        '<td><span class="chip ' + info.clase + '">' + svgIcon(info.icono, 'icon-14') + info.texto + '</span></td>' +
+        '</tr>';
+    }).join('');
+
+    calDiaTotal.textContent = fmt(diaInfo.totalHoras) + ' hs';
+    abrirModal(overlayCalDia);
+  }
+
+  var calSupervisor = crearCalendario('calSupervisor');
+  var calJefe = crearCalendario('calJefe');
+  var calPersonas = crearCalendario('calPersonas');
 
   /* ==================== FORM: CARGAR HORAS EXTRA ==================== */
   var formHE = document.getElementById('formHE');

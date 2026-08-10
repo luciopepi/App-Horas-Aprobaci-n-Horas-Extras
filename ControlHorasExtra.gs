@@ -84,8 +84,8 @@ const CACHE_TTL_DIRECTORIO = 300; // segundos
  * Normaliza un email para comparar y para usar como clave de mapa:
  * sin espacios y en minuscula. Usar SIEMPRE que se compare un email o
  * se use un email como clave (saldoSupervisor, tablaSaldos, _directorio,
- * validarCompensacion, rolDe, nombreDe). Sin esto, "Juan.Perez@x.com" y
- * "juan.perez@x.com" son dos personas distintas para el sistema.
+ * validarCompensacion, rolDe, nombreDe). Sin esto, "Juan.Perez@ejemplo.invalid"
+ * y "juan.perez@ejemplo.invalid" son dos personas distintas para el sistema.
  */
 function _normEmail(x) {
   return String(x || '').trim().toLowerCase();
@@ -1250,6 +1250,139 @@ function apiResolver(id, accion, confirmar) {
   } finally {
     lock.releaseLock();
   }
+}
+
+/**
+ * Extrae {anio, mes, dia} (mes 1-12) de un valor de "Fecha HE" que puede
+ * venir como Date real o como texto en formatos distintos: dd/MM/yyyy (lo
+ * que escribe un supervisor a mano, o lo que devuelve _fmtFecha), yyyy-MM-dd
+ * (ISO, lo que manda un <input type="date"> ya convertido), o cualquier otra
+ * cosa que el motor de fechas de JS pueda interpretar como ultimo recurso.
+ * Devuelve null si no se pudo interpretar nada.
+ */
+function _partesFecha(v) {
+  if (v instanceof Date && !isNaN(v.getTime())) {
+    return { anio: v.getFullYear(), mes: v.getMonth() + 1, dia: v.getDate() };
+  }
+  const s = String(v || '').trim();
+  if (!s) return null;
+
+  let m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(s);
+  if (m) return { anio: Number(m[1]), mes: Number(m[2]), dia: Number(m[3]) };
+
+  m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(s);
+  if (m) return { anio: Number(m[3]), mes: Number(m[2]), dia: Number(m[1]) };
+
+  const d = new Date(s);
+  if (!isNaN(d.getTime())) return { anio: d.getFullYear(), mes: d.getMonth() + 1, dia: d.getDate() };
+
+  return null;
+}
+
+/**
+ * Datos para la tarjeta "Calendario": dias del mes con horas extra
+ * cargadas (hoja Solicitudes), con el detalle de cada solicitud de ese
+ * dia. Filtra SIEMPRE por "Fecha HE" (el dia en que se hicieron las
+ * horas), NUNCA por Timestamp (el dia en que se cargaron): a quien mira
+ * el calendario le importa cuando paso, no cuando se anoto.
+ *
+ * Alcance por rol, filtrado en el SERVIDOR — nunca por un parametro que
+ * mande el cliente, asi que un Supervisor no puede ver datos de otro
+ * mandando otro anio/mes (esos parametros solo eligen el mes, no de quien
+ * son los datos):
+ *  - Jefe y Personas: todas las solicitudes del mes.
+ *  - Supervisor: solo las propias.
+ *
+ * Las Rechazadas no suman a ningun total (totalMes/totalAprobadas/
+ * totalPendientes/porSupervisor/horas del dia), pero SI aparecen en el
+ * `detalle` de su dia: el Jefe quiere ver que paso, no un recorte.
+ *
+ * @param {number|string} [anio]
+ * @param {number|string} [mes] 1-12
+ */
+function apiCalendario(anio, mes) {
+  const yo = _identificar();
+
+  const hoy = new Date();
+  let anioNum = parseInt(anio, 10);
+  let mesNum = parseInt(mes, 10);
+  if (!Number.isInteger(anioNum) || anioNum < 2000 || anioNum > 2100) {
+    anioNum = Number(Utilities.formatDate(hoy, CONFIG.TZ, 'yyyy'));
+  }
+  if (!Number.isInteger(mesNum) || mesNum < 1 || mesNum > 12) {
+    mesNum = Number(Utilities.formatDate(hoy, CONFIG.TZ, 'M'));
+  }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const d = ss.getSheetByName(SH.SOL).getDataRange().getValues();
+
+  const dias = {};
+  let totalMes = 0, totalAprobadas = 0, totalPendientes = 0;
+  const porSupervisorMapa = {};
+
+  if (d.length >= 2) {
+    const enc = d[0];
+    const cId = _idx(enc, 'ID'), cSup = _idx(enc, 'Supervisor'), cEmail = _idx(enc, 'Email'),
+          cFecha = _idx(enc, 'Fecha HE'), cHoras = _idx(enc, 'Horas'), cLinea = _idx(enc, 'Linea'),
+          cMotivo = _idx(enc, 'Motivo'), cEstado = _idx(enc, 'Estado');
+
+    for (let i = 1; i < d.length; i++) {
+      const partes = _partesFecha(d[i][cFecha]);
+      if (!partes || partes.anio !== anioNum || partes.mes !== mesNum) continue;
+      if (yo.rol === 'Supervisor' && _normEmail(d[i][cEmail]) !== yo.email) continue;
+
+      const estado = d[i][cEstado];
+      const horas = parseFloat(d[i][cHoras]) || 0;
+      const supervisor = d[i][cSup];
+
+      if (!dias[partes.dia]) {
+        dias[partes.dia] = {
+          dia: partes.dia, totalHoras: 0, horasAprobadas: 0, horasPendientes: 0,
+          supervisoresMapa: {}, detalle: []
+        };
+      }
+      const acc = dias[partes.dia];
+
+      acc.detalle.push({
+        id: d[i][cId], supervisor: supervisor, horas: horas,
+        linea: d[i][cLinea], motivo: d[i][cMotivo], estado: estado
+      });
+
+      if (estado === 'Aprobada' || estado === 'Pendiente') {
+        acc.totalHoras += horas;
+        if (estado === 'Aprobada') acc.horasAprobadas += horas;
+        else acc.horasPendientes += horas;
+        acc.supervisoresMapa[supervisor] = (acc.supervisoresMapa[supervisor] || 0) + horas;
+
+        totalMes += horas;
+        if (estado === 'Aprobada') totalAprobadas += horas;
+        else totalPendientes += horas;
+        porSupervisorMapa[supervisor] = (porSupervisorMapa[supervisor] || 0) + horas;
+      }
+      // Rechazada: ya quedo en el detalle de arriba; no suma a ningun total, a proposito.
+    }
+  }
+
+  const diasArray = Object.keys(dias).map(function (k) {
+    const acc = dias[k];
+    const supervisores = Object.keys(acc.supervisoresMapa).map(function (nombre) {
+      return { nombre: nombre, horas: acc.supervisoresMapa[nombre] };
+    }).sort(function (a, b) { return b.horas - a.horas; });
+    return {
+      dia: acc.dia, totalHoras: acc.totalHoras, horasAprobadas: acc.horasAprobadas,
+      horasPendientes: acc.horasPendientes, supervisores: supervisores, detalle: acc.detalle
+    };
+  }).sort(function (a, b) { return a.dia - b.dia; });
+
+  const porSupervisorArray = Object.keys(porSupervisorMapa).map(function (nombre) {
+    return { nombre: nombre, horas: porSupervisorMapa[nombre] };
+  }).sort(function (a, b) { return b.horas - a.horas; });
+
+  return {
+    anio: anioNum, mes: mesNum, dias: diasArray,
+    totalMes: totalMes, totalAprobadas: totalAprobadas, totalPendientes: totalPendientes,
+    porSupervisor: porSupervisorArray
+  };
 }
 
 // ==================== AUXILIARES ====================

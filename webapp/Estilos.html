@@ -650,6 +650,126 @@
     .jefe-grid { display: grid; grid-template-columns: 1.3fr 1fr; gap: 18px; align-items: start; }
   }
 
+  /* ==================== CALENDARIO ==================== */
+  .cal-card { margin-bottom: 14px; }
+
+  .cal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 4px;
+  }
+  .cal-mes-actual {
+    flex: 1;
+    text-align: center;
+    font-size: 14px;
+    font-weight: 700;
+  }
+  .cal-nav-btn {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--card2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    flex-shrink: 0;
+    transition: filter .15s ease;
+  }
+  .cal-nav-btn:hover { filter: brightness(1.08); }
+  .cal-nav-btn:disabled { opacity: .5; cursor: not-allowed; }
+
+  /* Skeleton de carga: reutiliza .sk-line, solo ajusta el contenedor. */
+  .cal-skeleton { display: flex; flex-direction: column; gap: 10px; padding: 6px 0 2px; }
+
+  .cal-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 3px;
+    margin-top: 6px;
+  }
+  .cal-weekday {
+    font-size: 8.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+    text-align: center;
+    padding-bottom: 4px;
+  }
+  .cal-day, .cal-day-blank {
+    aspect-ratio: 1;
+    min-height: 40px;
+    border-radius: 7px;
+  }
+  .cal-day-blank { background: transparent; }
+  .cal-day {
+    -webkit-appearance: none;
+    appearance: none;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    padding: 0;
+    border: 1.5px solid transparent;
+    background: transparent;
+    color: var(--text);
+    font-family: var(--font-sans);
+    position: relative;
+  }
+  .cal-day.is-vacio { color: var(--muted); cursor: default; }
+  .cal-day-num { font-size: 12px; font-weight: 700; line-height: 1; }
+  .cal-day-horas { font-size: 9.5px; font-weight: 700; line-height: 1; }
+  .cal-day-dot { width: 6px; height: 6px; margin-top: 1px; }
+
+  /* Estado del dia: color + forma + numero, nunca solo color (regla del
+     manual). Los alfas de los tintes estan verificados para dar >=4.5:1 al
+     texto de horas (--amber-text / --olive-text / --crimson-text) sobre
+     --card2 en los dos temas. */
+  /* Los puntos/marcas usan los mismos tokens *-text que el numero de
+     horas, NO el color "puro" del manual: el puro pasa 3:1 (contraste de
+     componente UI, WCAG 1.4.11) contra el tinte solo en oscuro, pero en
+     claro cae hasta 1.32:1 en pendiente y 2.08:1 en ok (medido). Los
+     tokens *-text ya estan calibrados a >=4.5:1 contra estos mismos
+     tintes (se usan como texto arriba), asi que de paso cumplen sobrado
+     el piso de 3:1 que pide un punto/marca no textual. */
+  .cal-day.is-pendiente { background: rgba(248,192,64,0.18); }
+  .cal-day.is-pendiente .cal-day-horas { color: var(--amber-text); }
+  .cal-day.is-pendiente .cal-day-dot { background: var(--amber-text); border-radius: 50%; }
+
+  .cal-day.is-ok { background: rgba(152,160,64,0.14); }
+  .cal-day.is-ok .cal-day-horas { color: var(--olive-text); }
+  .cal-day.is-ok .cal-day-dot { background: var(--olive-text); border-radius: 2px; }
+
+  .cal-day.is-rechazada { background: rgba(216,24,64,0.16); }
+  .cal-day.is-rechazada .cal-day-horas { color: var(--crimson-text); }
+  .cal-day.is-rechazada .cal-day-dot {
+    width: 0; height: 0; margin-top: 0; background: transparent;
+    border-left: 3.5px solid transparent;
+    border-right: 3.5px solid transparent;
+    border-bottom: 6px solid var(--crimson-text);
+  }
+
+  @media (prefers-color-scheme: light) {
+    .cal-day.is-ok { background: rgba(152,160,64,0.18); }
+    .cal-day.is-rechazada { background: rgba(216,24,64,0.10); }
+  }
+  :root[data-theme="light"] .cal-day.is-ok { background: rgba(152,160,64,0.18); }
+  :root[data-theme="light"] .cal-day.is-rechazada { background: rgba(216,24,64,0.10); }
+
+  /* Hoy: borde en --text (no un color semantico) para no mezclarse con el
+     codigo de color de aprobada/pendiente/rechazada. El wine del manual
+     falla el contraste 3:1 de componentes UI contra --card2 en oscuro
+     (1.37:1); --text da >=11:1 en los dos temas. */
+  .cal-day.is-hoy { border-color: var(--text); }
+
+  .cal-resumen { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+  .cal-resumen-total { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  .cal-resumen-total b { font-size: 16px; }
+
   /* ==================== TABLA (vista Personas) ==================== */
   .tabla-wrap { overflow-x: auto; }
   table.tabla { width: 100%; border-collapse: collapse; min-width: 480px; }
@@ -675,6 +795,15 @@
   table.tabla tbody tr:hover { background: var(--tr-hover); }
   table.tabla tbody tr:last-child td { border-bottom: 0; }
   .persona-cell { display: flex; align-items: center; gap: 8px; font-weight: 700; font-variant-numeric: normal; }
+
+  /* Tabla del detalle de un dia (modal de Calendario): el Motivo es lo que
+     mas le importa a quien mira, asi que NO se recorta con ellipsis, hace
+     wrap. min-width en vez de heredar el de .tabla (pensado para una tabla
+     mas ancha de 4 columnas numericas), asi entra mejor en el modal. */
+  .tabla-caldia { min-width: 0; }
+  .tabla-caldia th, .tabla-caldia td { padding: 8px 8px; }
+  .motivo-cell { white-space: normal; word-break: break-word; min-width: 130px; }
+  .cal-dia-total { margin-top: 12px; }
 
   /* ==================== MODALES ==================== */
   .modal-overlay {
@@ -714,6 +843,13 @@
   }
   .modal-overlay.open .modal { transform: scale(1) translateY(0); opacity: 1; }
   .modal-overlay:not(.open) .modal { transition: transform 200ms ease, opacity 200ms ease; }
+
+  /* Modal mas ancho para el detalle del dia del Calendario: tiene una
+     tabla de 5 columnas con Motivo sin recortar, necesita mas aire que los
+     formularios de 440px. */
+  @media (min-width: 640px) {
+    .modal-ancho { max-width: 620px; }
+  }
 
   .modal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
   .modal-close {

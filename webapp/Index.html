@@ -121,6 +121,20 @@
         <ul class="solicitudes-list" id="listaSolicitudes"><!-- items via JS --></ul>
       </section>
 
+      <section class="card cal-card surface" aria-labelledby="calSupervisorHeading">
+        <div class="section-title"><h2 class="h3" id="calSupervisorHeading">Calendario</h2></div>
+        <div class="cal-header">
+          <button type="button" class="cal-nav-btn" id="calSupervisorPrev" aria-label="Mes anterior">
+            <svg class="icon icon-18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+          </button>
+          <div class="cal-mes-actual num" id="calSupervisorTitulo">-</div>
+          <button type="button" class="cal-nav-btn" id="calSupervisorNext" aria-label="Mes siguiente">
+            <svg class="icon icon-18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+          </button>
+        </div>
+        <div id="calSupervisorBody" aria-live="polite"><!-- grilla via JS --></div>
+      </section>
+
       <p class="foot-note">VSPT Wine Group · Planta Graffigna · San Juan, Argentina</p>
     </section>
 
@@ -141,6 +155,20 @@
           <ul class="equipo-list" id="listaEquipo"><!-- items via JS --></ul>
         </section>
       </div>
+
+      <section class="card cal-card surface" aria-labelledby="calJefeHeading">
+        <div class="section-title"><h2 class="h3" id="calJefeHeading">Calendario</h2></div>
+        <div class="cal-header">
+          <button type="button" class="cal-nav-btn" id="calJefePrev" aria-label="Mes anterior">
+            <svg class="icon icon-18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+          </button>
+          <div class="cal-mes-actual num" id="calJefeTitulo">-</div>
+          <button type="button" class="cal-nav-btn" id="calJefeNext" aria-label="Mes siguiente">
+            <svg class="icon icon-18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+          </button>
+        </div>
+        <div id="calJefeBody" aria-live="polite"><!-- grilla via JS --></div>
+      </section>
 
       <p class="foot-note">VSPT Wine Group · Planta Graffigna · San Juan, Argentina</p>
     </section>
@@ -185,6 +213,20 @@
             <tbody id="personasTablaBody"><!-- filas via JS --></tbody>
           </table>
         </div>
+      </section>
+
+      <section class="card cal-card surface" aria-labelledby="calPersonasHeading">
+        <div class="section-title"><h2 class="h3" id="calPersonasHeading">Calendario</h2></div>
+        <div class="cal-header">
+          <button type="button" class="cal-nav-btn" id="calPersonasPrev" aria-label="Mes anterior">
+            <svg class="icon icon-18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+          </button>
+          <div class="cal-mes-actual num" id="calPersonasTitulo">-</div>
+          <button type="button" class="cal-nav-btn" id="calPersonasNext" aria-label="Mes siguiente">
+            <svg class="icon icon-18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+          </button>
+        </div>
+        <div id="calPersonasBody" aria-live="polite"><!-- grilla via JS --></div>
       </section>
 
       <p class="foot-note">Vista de consulta — sin acciones de aprobacion ni edicion.</p>
@@ -278,6 +320,40 @@
       <div class="modal-footer">
         <button type="button" class="btn btn-ghost" data-close>Cancelar</button>
         <button type="submit" class="btn btn-primary" form="formComp" id="btnEnviarComp">Enviar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== MODAL: DETALLE DEL DIA (Calendario) ==================== -->
+  <div class="modal-overlay" id="overlayCalDia" aria-hidden="true">
+    <div class="modal surface modal-ancho" role="dialog" aria-modal="true" aria-labelledby="tituloModalCalDia">
+      <div class="modal-header">
+        <h2 id="tituloModalCalDia" class="h3">Detalle del dia</h2>
+        <button type="button" class="modal-close" data-close aria-label="Cerrar">
+          <svg class="icon icon-16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="tabla-wrap">
+          <table class="tabla tabla-caldia">
+            <thead>
+              <tr>
+                <th>Supervisor</th>
+                <th class="num-col">Horas</th>
+                <th>Linea</th>
+                <th>Motivo</th>
+                <th>Estado</th>
+              </tr>
+            </thead>
+            <tbody id="calDiaTablaBody"><!-- filas via JS --></tbody>
+          </table>
+        </div>
+        <div class="calc-row calc-result cal-dia-total">
+          <span>Total del dia</span><b class="num" id="calDiaTotal">0,0 hs</b>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-ghost" data-close>Cerrar</button>
       </div>
     </div>
   </div>

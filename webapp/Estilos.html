@@ -565,10 +565,40 @@
     text-transform: uppercase;
     letter-spacing: 0.1em;
     opacity: 0;
+    /* Sin esto el cartel se come todos los clics de la tarjeta: cubre el
+       area completa y, aunque sea invisible por opacidad, sigue recibiendo
+       eventos. Los botones Aprobar y Rechazar quedaban muertos. */
+    pointer-events: none;
     border-radius: var(--radius-card);
   }
   .approved-flash.show { animation: flashIn .5s ease both; }
   @keyframes flashIn { 0% { opacity: 0; } 15% { opacity: 1; } 85% { opacity: 1; } 100% { opacity: 0; } }
+
+  /* Fila de horas sueltas: aparece solo al elegir "Otra cantidad". */
+  .horas-sueltas {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin: 2px 0 0 26px;
+  }
+  .horas-sueltas label {
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .horas-sueltas input {
+    width: 92px;
+    background: var(--card2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-input);
+    padding: 7px 10px;
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+  }
+  .horas-sueltas input:focus {
+    outline: none;
+    border-color: var(--vspt-amber);
+  }
 
   /* Panel de "aprobar en descubierto" cuando el saldo de una compensacion no alcanza. */
   .confirmar-descubierto {

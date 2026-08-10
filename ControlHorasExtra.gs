@@ -1133,6 +1133,19 @@ function apiCrearCompensacion(payload) {
   } else if (tipoCrudo === 'completo') {
     tipo = 'Dia completo';
     horas = CONFIG.HORAS_POR_DIA;
+  } else if (tipoCrudo === 'personalizado') {
+    // Unico caso donde la cantidad la elige el usuario. En dia completo y
+    // medio dia la calcula el servidor y se ignora cualquier numero que
+    // mande el cliente, para que no se pueda tocar el saldo con un pedido
+    // armado a mano.
+    horas = Number(payload.horas);
+    if (!isFinite(horas) || !Number.isInteger(horas) || horas < 1) {
+      throw new Error('La cantidad de horas tiene que ser un numero entero de 1 hora o mas.');
+    }
+    if (horas > 24 * 30) {
+      throw new Error('La cantidad de horas es demasiado alta. Revisala.');
+    }
+    tipo = 'Horas sueltas';
   } else {
     throw new Error('Tipo de compensacion invalido.');
   }

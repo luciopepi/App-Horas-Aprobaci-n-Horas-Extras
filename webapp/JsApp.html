@@ -498,10 +498,48 @@
   var btnEnviarComp = document.getElementById('btnEnviarComp');
   var formComp = document.getElementById('formComp');
 
-  function calcularComp() {
+  var compHorasSueltasFila = document.getElementById('compHorasSueltasFila');
+  var compHorasSueltas = document.getElementById('compHorasSueltas');
+
+  // Horas del pedido segun el tipo elegido. Devuelve null si el usuario
+  // eligio "otra cantidad" y todavia no puso un entero valido: en ese caso
+  // no hay nada que calcular y el envio queda bloqueado.
+  function horasPedidas() {
     var tipo = formComp.tipo.value;
-    var horas = tipo === 'medio' ? 4 : 8;
+    if (tipo === 'completo') return 8;
+    if (tipo === 'medio') return 4;
+    var v = compHorasSueltas.value.trim();
+    if (v === '') return null;
+    var n = Number(v);
+    if (!isFinite(n) || n < 1 || Math.floor(n) !== n) return null;
+    return n;
+  }
+
+  function calcularComp() {
+    var esSuelta = formComp.tipo.value === 'personalizado';
+    compHorasSueltasFila.hidden = !esSuelta;
+
+    var horas = horasPedidas();
     var saldoActual = (estadoActual && estadoActual.saldo) ? estadoActual.saldo.disponible : 0;
+
+    // Con "otra cantidad" vacia o no entera, mostramos el pedido en blanco
+    // y avisamos que falta el dato, en vez de calcular sobre un cero que
+    // haria parecer que el pedido es valido.
+    if (horas === null) {
+      compHorasDescontar.textContent = '—';
+      compSaldoActual.textContent = fmt(saldoActual) + ' hs';
+      compSaldoResultante.textContent = '—';
+      compCalcBox.classList.remove('invalid');
+      var vacio = compHorasSueltas.value.trim() === '';
+      compErrorTexto.textContent = vacio
+        ? 'Indica cuantas horas queres compensar.'
+        : 'La cantidad tiene que ser un numero entero de horas, de 1 en adelante.';
+      compError.hidden = vacio;
+      btnEnviarComp.disabled = true;
+      btnEnviarComp.setAttribute('aria-disabled', 'true');
+      return;
+    }
+
     var resultante = saldoActual - horas;
     var insuficiente = resultante < 0;
 
@@ -516,8 +554,12 @@
   }
 
   Array.prototype.forEach.call(formComp.querySelectorAll('input[name="tipo"]'), function (r) {
-    r.addEventListener('change', calcularComp);
+    r.addEventListener('change', function () {
+      calcularComp();
+      if (formComp.tipo.value === 'personalizado') compHorasSueltas.focus();
+    });
   });
+  compHorasSueltas.addEventListener('input', calcularComp);
 
   formComp.addEventListener('submit', async function (ev) {
     ev.preventDefault();
@@ -527,7 +569,10 @@
     try {
       await llamarServidor('apiCrearCompensacion', {
         fecha: formComp.fecha.value,
-        tipo: formComp.tipo.value
+        tipo: formComp.tipo.value,
+        // Solo se usa con "otra cantidad": en dia completo y medio dia el
+        // servidor calcula las horas por su cuenta y descarta este valor.
+        horas: horasPedidas()
       });
       cerrarModal(overlayComp);
       mostrarExito('Compensacion solicitada');

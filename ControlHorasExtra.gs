@@ -1293,9 +1293,12 @@ function _partesFecha(v) {
  *  - Jefe y Personas: todas las solicitudes del mes.
  *  - Supervisor: solo las propias.
  *
- * Las Rechazadas no suman a ningun total (totalMes/totalAprobadas/
- * totalPendientes/porSupervisor/horas del dia), pero SI aparecen en el
- * `detalle` de su dia: el Jefe quiere ver que paso, no un recorte.
+ * El numero de cada dia y el total del mes cuentan SOLO horas Aprobadas.
+ * Las Pendientes viajan aparte (horasPendientes/totalPendientes/
+ * horasPendientes por supervisor) y el cliente las muestra subordinadas,
+ * nunca sumadas al numero principal. Las Rechazadas no suman a ningun
+ * total, pero SI aparecen en el `detalle` de su dia: el Jefe quiere ver
+ * que paso, no un recorte.
  *
  * @param {number|string} [anio]
  * @param {number|string} [mes] 1-12
@@ -1317,7 +1320,7 @@ function apiCalendario(anio, mes) {
   const d = ss.getSheetByName(SH.SOL).getDataRange().getValues();
 
   const dias = {};
-  let totalMes = 0, totalAprobadas = 0, totalPendientes = 0;
+  let totalAprobadas = 0, totalPendientes = 0;
   const porSupervisorMapa = {};
 
   if (d.length >= 2) {
@@ -1337,8 +1340,7 @@ function apiCalendario(anio, mes) {
 
       if (!dias[partes.dia]) {
         dias[partes.dia] = {
-          dia: partes.dia, totalHoras: 0, horasAprobadas: 0, horasPendientes: 0,
-          supervisoresMapa: {}, detalle: []
+          dia: partes.dia, horasAprobadas: 0, horasPendientes: 0, detalle: []
         };
       }
       const acc = dias[partes.dia];
@@ -1348,16 +1350,16 @@ function apiCalendario(anio, mes) {
         linea: d[i][cLinea], motivo: d[i][cMotivo], estado: estado
       });
 
-      if (estado === 'Aprobada' || estado === 'Pendiente') {
-        acc.totalHoras += horas;
-        if (estado === 'Aprobada') acc.horasAprobadas += horas;
-        else acc.horasPendientes += horas;
-        acc.supervisoresMapa[supervisor] = (acc.supervisoresMapa[supervisor] || 0) + horas;
-
-        totalMes += horas;
-        if (estado === 'Aprobada') totalAprobadas += horas;
-        else totalPendientes += horas;
-        porSupervisorMapa[supervisor] = (porSupervisorMapa[supervisor] || 0) + horas;
+      if (estado === 'Aprobada') {
+        acc.horasAprobadas += horas;
+        totalAprobadas += horas;
+        if (!porSupervisorMapa[supervisor]) porSupervisorMapa[supervisor] = { horasAprobadas: 0, horasPendientes: 0 };
+        porSupervisorMapa[supervisor].horasAprobadas += horas;
+      } else if (estado === 'Pendiente') {
+        acc.horasPendientes += horas;
+        totalPendientes += horas;
+        if (!porSupervisorMapa[supervisor]) porSupervisorMapa[supervisor] = { horasAprobadas: 0, horasPendientes: 0 };
+        porSupervisorMapa[supervisor].horasPendientes += horas;
       }
       // Rechazada: ya quedo en el detalle de arriba; no suma a ningun total, a proposito.
     }
@@ -1365,24 +1367,85 @@ function apiCalendario(anio, mes) {
 
   const diasArray = Object.keys(dias).map(function (k) {
     const acc = dias[k];
-    const supervisores = Object.keys(acc.supervisoresMapa).map(function (nombre) {
-      return { nombre: nombre, horas: acc.supervisoresMapa[nombre] };
-    }).sort(function (a, b) { return b.horas - a.horas; });
     return {
-      dia: acc.dia, totalHoras: acc.totalHoras, horasAprobadas: acc.horasAprobadas,
-      horasPendientes: acc.horasPendientes, supervisores: supervisores, detalle: acc.detalle
+      dia: acc.dia, horasAprobadas: acc.horasAprobadas,
+      horasPendientes: acc.horasPendientes, detalle: acc.detalle
     };
   }).sort(function (a, b) { return a.dia - b.dia; });
 
   const porSupervisorArray = Object.keys(porSupervisorMapa).map(function (nombre) {
-    return { nombre: nombre, horas: porSupervisorMapa[nombre] };
-  }).sort(function (a, b) { return b.horas - a.horas; });
+    return {
+      nombre: nombre,
+      horasAprobadas: porSupervisorMapa[nombre].horasAprobadas,
+      horasPendientes: porSupervisorMapa[nombre].horasPendientes
+    };
+  }).sort(function (a, b) { return b.horasAprobadas - a.horasAprobadas; });
 
   return {
     anio: anioNum, mes: mesNum, dias: diasArray,
-    totalMes: totalMes, totalAprobadas: totalAprobadas, totalPendientes: totalPendientes,
+    totalAprobadas: totalAprobadas, totalPendientes: totalPendientes,
     porSupervisor: porSupervisorArray
   };
+}
+
+/**
+ * Datos para el panel de consulta con filtros (Jefe y Personas): TODAS las
+ * solicitudes de horas extra (hoja Solicitudes), con la fecha desglosada
+ * en partes, para que el cliente filtre por supervisor/mes/semana ISO/
+ * estado/linea sin ida y vuelta al servidor por cada cambio de filtro.
+ *
+ * Alcance por rol, filtrado en el SERVIDOR — mismo patron que
+ * apiCalendario (linea por linea):
+ *  - Jefe y Personas: todas las filas.
+ *  - Supervisor: solo las propias.
+ * Los 4 filtros del panel son presentacion sobre datos que el rol ya tiene
+ * derecho a ver completos; con ~28 filas por mes, filtrar en el cliente da
+ * respuesta instantanea en vez de un round-trip de 0,5-2s por cada cambio
+ * de filtro. El cliente NUNCA recibe una fila que su rol no pueda ver. Si
+ * esta hoja algun dia supera ~2000 filas, agregar un parametro anio para
+ * no traer todo el historico de una.
+ *
+ * Solo hoja Solicitudes (HE): las Compensaciones no tienen "Linea" y no
+ * son lo que pide este panel.
+ *
+ * NO devuelve objetos Date: google.script.run los serializa con corrimiento
+ * de zona horaria. Se manda {anio,mes,dia} (via _partesFecha, null si la
+ * fecha no se pudo interpretar) mas un texto ya formateado (via _fmtFecha)
+ * solo para mostrar. NO devuelve email ni token: no le hacen falta al
+ * cliente y el token jamas tiene que salir del mail de aprobacion.
+ *
+ * @returns {{solicitudes: Array}}
+ */
+function apiConsulta() {
+  const yo = _identificar();
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const d = ss.getSheetByName(SH.SOL).getDataRange().getValues();
+
+  const solicitudes = [];
+  if (d.length >= 2) {
+    const enc = d[0];
+    const cId = _idx(enc, 'ID'), cSup = _idx(enc, 'Supervisor'), cEmail = _idx(enc, 'Email'),
+          cFecha = _idx(enc, 'Fecha HE'), cHoras = _idx(enc, 'Horas'), cLinea = _idx(enc, 'Linea'),
+          cMotivo = _idx(enc, 'Motivo'), cEstado = _idx(enc, 'Estado');
+
+    for (let i = 1; i < d.length; i++) {
+      if (yo.rol === 'Supervisor' && _normEmail(d[i][cEmail]) !== yo.email) continue;
+
+      solicitudes.push({
+        id: d[i][cId],
+        supervisor: d[i][cSup],
+        fecha: _partesFecha(d[i][cFecha]),
+        fechaTexto: _fmtFecha(d[i][cFecha]),
+        horas: parseFloat(d[i][cHoras]) || 0,
+        linea: d[i][cLinea],
+        motivo: d[i][cMotivo],
+        estado: d[i][cEstado]
+      });
+    }
+  }
+
+  return { solicitudes: solicitudes };
 }
 
 // ==================== AUXILIARES ====================

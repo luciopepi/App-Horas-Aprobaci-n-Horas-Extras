@@ -21,6 +21,12 @@
     return (Math.round((n || 0) * 10) / 10).toFixed(1).replace('.', ',');
   };
 
+  // Para indicadores chicos: entero sin ",0" (2 -> "2", 2.5 -> "2,5").
+  function fmtCorto(n) {
+    var num = Math.round((n || 0) * 10) / 10;
+    return (num % 1 === 0) ? String(num) : String(num).replace('.', ',');
+  }
+
   // Escapa texto antes de insertarlo con innerHTML. El "Motivo" lo escribe
   // el supervisor y se termina mostrando en la pantalla del Jefe, asi que
   // nunca hay que volcarlo crudo en el HTML.
@@ -149,8 +155,8 @@
       estadoActual = data;
       mostrarVista(data.yo.rol);
       if (data.yo.rol === 'Supervisor') { renderSupervisor(data); calSupervisor.recargarActual(); }
-      if (data.yo.rol === 'Jefe') { renderJefe(data); calJefe.recargarActual(); }
-      if (data.yo.rol === 'Personas') { renderPersonas(data); calPersonas.recargarActual(); }
+      if (data.yo.rol === 'Jefe') { renderJefe(data); calJefe.recargarActual(); if (conJefe) conJefe.recargar(); }
+      if (data.yo.rol === 'Personas') { renderPersonas(data); calPersonas.recargarActual(); if (conPersonas) conPersonas.recargar(); }
 
       // El Jefe tambien puede cargar horas extra propias. Si tiene
       // actividad, ademas de su bandeja de pendientes ve su panel
@@ -463,8 +469,54 @@
   /* ==================== CALENDARIO ==================== */
   var MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio',
     'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+  var MESES_ABREV = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
   var DIAS_SEMANA_CORTO = ['LUN', 'MAR', 'MIE', 'JUE', 'VIE', 'SAB', 'DOM'];
   var DIAS_SEMANA_LARGO = ['Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', 'Sabado', 'Domingo'];
+
+  // Semana ISO 8601 a partir de partes de fecha (todo en UTC para que la
+  // aritmetica de dias sea exacta, sin corrimientos de zona horaria).
+  function isoSemana(anio, mes, dia) {
+    var d = new Date(Date.UTC(anio, mes - 1, dia));
+    var dow = (d.getUTCDay() + 6) % 7;            // 0=lunes .. 6=domingo
+    d.setUTCDate(d.getUTCDate() - dow + 3);       // jueves de esa semana
+    var anioISO = d.getUTCFullYear();
+    var ene4 = new Date(Date.UTC(anioISO, 0, 4));
+    var semana = 1 + Math.round(((d - ene4) / 86400000 - 3 + ((ene4.getUTCDay() + 6) % 7)) / 7);
+    return { anioISO: anioISO, semana: semana };
+  }
+  function lunesDe(anio, mes, dia) {
+    var d = new Date(Date.UTC(anio, mes - 1, dia));
+    d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
+    return d;
+  }
+
+  // Semanas ISO que intersectan un mes: desde el lunes de la semana que
+  // contiene el dia 1 hasta que el lunes de la semana siguiente ya cae
+  // despues del ultimo dia del mes. El corte temporal de una semana
+  // elegida es SIEMPRE la semana completa (lunes a domingo), aunque pise
+  // el mes anterior o siguiente (ver filtroTemporal en crearPanelConsulta).
+  function opcionesSemanaParaMes(anio, mes) {
+    var opciones = [];
+    var finMesTS = Date.UTC(anio, mes - 1, diasEnMes(anio, mes - 1));
+    var lunes = lunesDe(anio, mes, 1);
+    while (lunes.getTime() <= finMesTS) {
+      var hastaDate = new Date(lunes.getTime() + 6 * 86400000);
+      var desde = { anio: lunes.getUTCFullYear(), mes: lunes.getUTCMonth() + 1, dia: lunes.getUTCDate() };
+      var hasta = { anio: hastaDate.getUTCFullYear(), mes: hastaDate.getUTCMonth() + 1, dia: hastaDate.getUTCDate() };
+      var iso = isoSemana(desde.anio, desde.mes, desde.dia);
+      opciones.push({ anioISO: iso.anioISO, semana: iso.semana, desde: desde, hasta: hasta });
+      lunes = new Date(lunes.getTime() + 7 * 86400000);
+    }
+    return opciones;
+  }
+
+  // "S33 · 10–16 ago" o, si la semana pisa dos meses, "S31 · 27 jul – 2 ago".
+  function etiquetaSemana(o) {
+    var rango = (o.desde.mes === o.hasta.mes)
+      ? o.desde.dia + '–' + o.hasta.dia + ' ' + MESES_ABREV[o.hasta.mes - 1]
+      : o.desde.dia + ' ' + MESES_ABREV[o.desde.mes - 1] + ' – ' + o.hasta.dia + ' ' + MESES_ABREV[o.hasta.mes - 1];
+    return 'S' + o.semana + ' · ' + rango;
+  }
 
   // JS da 0=domingo..6=sabado. Aca se usa semana que arranca en lunes, asi
   // que se rota: 0=lunes..6=domingo.
@@ -477,8 +529,9 @@
 
   // Precedencia del estado de un dia: si tiene algo pendiente es lo que
   // mas urge verlo (amber); si no, y tiene algo aprobado, esta resuelto
-  // (olive); si el dia solo tiene rechazadas, totalHoras da 0 pero el
-  // Jefe igual quiere poder entrar a ver que paso (crimson).
+  // (olive); si el dia solo tiene rechazadas, horasAprobadas y
+  // horasPendientes dan 0 pero el Jefe igual quiere poder entrar a ver
+  // que paso (crimson).
   function estadoDia(diaInfo) {
     if (!diaInfo) return 'is-vacio';
     if (diaInfo.horasPendientes > 0) return 'is-pendiente';
@@ -533,15 +586,26 @@
         var clases = 'cal-day ' + estadoDia(info) + (esHoy ? ' is-hoy' : '');
         if (info) {
           var nSolic = info.detalle.length;
-          var etiqueta;
-          if (info.horasPendientes > 0) etiqueta = fmt(info.totalHoras) + ' horas, con pendientes';
-          else if (info.horasAprobadas > 0) etiqueta = fmt(info.totalHoras) + ' horas aprobadas';
-          else etiqueta = 'sin horas aprobadas ni pendientes, rechazada';
-          var aria = dia + ' de ' + MESES[data.mes - 1].toLowerCase() + ', ' + etiqueta + ', ' +
+          var partesEtiqueta = [];
+          if (info.horasAprobadas > 0) {
+            partesEtiqueta.push(fmtCorto(info.horasAprobadas) + (info.horasAprobadas === 1 ? ' hora aprobada' : ' horas aprobadas'));
+          }
+          if (info.horasPendientes > 0) {
+            partesEtiqueta.push(fmtCorto(info.horasPendientes) + ' pendientes');
+          }
+          if (!partesEtiqueta.length) partesEtiqueta.push('sin horas aprobadas ni pendientes, con rechazadas');
+          var aria = dia + ' de ' + MESES[data.mes - 1].toLowerCase() + ', ' + partesEtiqueta.join(', ') + ', ' +
             nSolic + (nSolic === 1 ? ' solicitud' : ' solicitudes');
+          var horasHTML = '';
+          if (info.horasAprobadas > 0 || info.horasPendientes > 0) {
+            horasHTML = '<span class="cal-day-linea-horas">' +
+              (info.horasAprobadas > 0 ? '<span class="cal-day-horas num">' + fmtCorto(info.horasAprobadas) + '</span>' : '') +
+              (info.horasPendientes > 0 ? '<span class="cal-day-pend">+' + fmtCorto(info.horasPendientes) + 'p</span>' : '') +
+              '</span>';
+          }
           celdas += '<button type="button" class="' + clases + '" data-dia="' + dia + '" aria-label="' + esc(aria) + '">' +
             '<span class="cal-day-num">' + dia + '</span>' +
-            (info.totalHoras > 0 ? '<span class="cal-day-horas num">' + fmt(info.totalHoras) + '</span>' : '') +
+            horasHTML +
             '<span class="cal-day-dot" aria-hidden="true"></span>' +
             '</button>';
         } else {
@@ -555,19 +619,26 @@
       var weekdayHTML = DIAS_SEMANA_CORTO.map(function (d) { return '<div class="cal-weekday">' + d + '</div>'; }).join('');
 
       var resumenHTML = '';
-      if (data.totalMes > 0) {
-        var maxHoras = Math.max.apply(null, (data.porSupervisor || []).map(function (p) { return p.horas; }).concat([1]));
+      if (data.totalAprobadas > 0 || data.totalPendientes > 0) {
+        var maxHoras = Math.max.apply(null, (data.porSupervisor || []).map(function (p) { return p.horasAprobadas; }).concat([1]));
         var filasSup = (data.porSupervisor || []).map(function (p, i) {
-          var pct = maxHoras > 0 ? Math.max(4, Math.round((p.horas / maxHoras) * 100)) : 4;
+          var pct = maxHoras > 0 ? Math.max(4, Math.round((p.horasAprobadas / maxHoras) * 100)) : 4;
           return '<li class="equipo-item" style="--i:' + i + '">' +
             '<div class="equipo-info">' + svgIcon('user', 'icon-16') + '<strong>' + esc(p.nombre) + '</strong></div>' +
             '<div class="equipo-bar-track"><div class="equipo-bar" style="--pct:' + pct + '%"></div></div>' +
-            '<span class="equipo-saldo num">' + fmt(p.horas) + ' hs</span>' +
+            '<span class="equipo-saldo num">' + fmt(p.horasAprobadas) + ' hs' +
+              (p.horasPendientes > 0 ? '<span class="cal-sup-pend">+' + fmtCorto(p.horasPendientes) + 'p</span>' : '') +
+              '</span>' +
             '</li>';
         }).join('');
+        var pendLineaHTML = data.totalPendientes > 0
+          ? '<div class="cal-resumen-pend"><span class="chip chip-pendiente">' + svgIcon('clock', 'icon-14') +
+            '+' + fmt(data.totalPendientes) + ' hs pendientes</span></div>'
+          : '';
         resumenHTML =
           '<div class="cal-resumen">' +
-            '<div class="cal-resumen-total"><span class="eyebrow">Total del mes</span><b class="num">' + fmt(data.totalMes) + ' hs</b></div>' +
+            '<div class="cal-resumen-total"><span class="eyebrow">Total del mes</span><b class="num">' + fmt(data.totalAprobadas) + ' hs</b></div>' +
+            pendLineaHTML +
             '<ul class="equipo-list">' + filasSup + '</ul>' +
           '</div>';
       }
@@ -628,6 +699,8 @@
   var tituloModalCalDia = document.getElementById('tituloModalCalDia');
   var calDiaTablaBody = document.getElementById('calDiaTablaBody');
   var calDiaTotal = document.getElementById('calDiaTotal');
+  var calDiaPendRow = document.getElementById('calDiaPendRow');
+  var calDiaPend = document.getElementById('calDiaPend');
 
   function abrirDetalleDia(data, diaInfo) {
     var fechaObj = new Date(data.anio, data.mes - 1, diaInfo.dia);
@@ -646,13 +719,303 @@
         '</tr>';
     }).join('');
 
-    calDiaTotal.textContent = fmt(diaInfo.totalHoras) + ' hs';
+    if (diaInfo.horasPendientes > 0) {
+      calDiaPend.textContent = fmt(diaInfo.horasPendientes) + ' hs';
+      calDiaPendRow.hidden = false;
+    } else {
+      calDiaPendRow.hidden = true;
+    }
+    calDiaTotal.textContent = fmt(diaInfo.horasAprobadas) + ' hs';
     abrirModal(overlayCalDia);
   }
 
   var calSupervisor = crearCalendario('calSupervisor');
   var calJefe = crearCalendario('calJefe');
   var calPersonas = crearCalendario('calPersonas');
+
+  /* ==================== PANEL CONSULTA (Jefe / Personas) ==================== */
+  // Un panel de consulta por vista (Jefe/Personas). apiConsulta() ya
+  // devuelve solo las filas que el rol de quien pregunta puede ver
+  // (resuelto en el SERVIDOR, igual que apiCalendario); los 5 filtros de
+  // aca son PRESENTACION en el cliente sobre ese mismo conjunto de datos,
+  // nunca una fuente adicional de alcance. No va en viewSupervisor: un
+  // Supervisor ya ve sus propias solicitudes en "Mis solicitudes".
+  function crearPanelConsulta(prefijo) {
+    var elSupervisor = document.getElementById(prefijo + 'Supervisor');
+    var elMes = document.getElementById(prefijo + 'Mes');
+    var elSemana = document.getElementById(prefijo + 'Semana');
+    var elEstado = document.getElementById(prefijo + 'Estado');
+    var elLinea = document.getElementById(prefijo + 'Linea');
+    var elLimpiar = document.getElementById(prefijo + 'Limpiar');
+    var elResumen = document.getElementById(prefijo + 'Resumen');
+    var elDesglose = document.getElementById(prefijo + 'Desglose');
+    var elLista = document.getElementById(prefijo + 'Lista');
+
+    var hoy = new Date();
+    var claveHoy = hoy.getFullYear() + '-' + (hoy.getMonth() + 1);
+    var datos = [];
+    var cargando = false;
+    // Defaults (2.1h del plan): Mes = mes actual, Semana = todas,
+    // Estado = Todos, Supervisor = Todos, Linea = Todas.
+    var filtros = {
+      supervisor: 'Todos', mesValor: claveHoy, semanaValor: '',
+      estado: 'Todos', linea: 'Todas'
+    };
+
+    // Clave numerica para ordenar por fecha desc; las filas sin fecha
+    // legible (fecha:null) quedan al final.
+    function claveFecha(f) {
+      return f.fecha ? (f.fecha.anio * 10000 + f.fecha.mes * 100 + f.fecha.dia) : -1;
+    }
+
+    // El corte temporal es SIEMPRE semana O mes, nunca los dos a la vez
+    // (aplicar ambos recortaria la semana ISO y daria un total falso si la
+    // semana pisa el mes anterior o siguiente).
+    function pasaFila(f) {
+      if (filtros.supervisor !== 'Todos' && f.supervisor !== filtros.supervisor) return false;
+      if (filtros.estado !== 'Todos' && f.estado !== filtros.estado) return false;
+      if (filtros.linea !== 'Todas' && f.linea !== filtros.linea) return false;
+      if (filtros.semanaValor) {
+        if (!f.fecha) return false;
+        var iso = isoSemana(f.fecha.anio, f.fecha.mes, f.fecha.dia);
+        var sp = filtros.semanaValor.split('-');
+        if (iso.anioISO !== Number(sp[0]) || iso.semana !== Number(sp[1])) return false;
+      } else if (filtros.mesValor !== 'Todos') {
+        if (!f.fecha) return false;
+        var mp = filtros.mesValor.split('-');
+        if (f.fecha.anio !== Number(mp[0]) || f.fecha.mes !== Number(mp[1])) return false;
+      }
+      return true;
+    }
+
+    function actualizarDisabledSemana() {
+      var deshabilitada = filtros.mesValor === 'Todos';
+      elSemana.disabled = deshabilitada;
+      elSemana.title = deshabilitada ? 'Elegi un mes primero' : '';
+      if (deshabilitada) elSemana.setAttribute('aria-disabled', 'true');
+      else elSemana.removeAttribute('aria-disabled');
+    }
+
+    // Opciones = "Todos" + nombres distintos presentes EN LOS DATOS
+    // (alfabetico): sale de los datos y no del directorio, asi se puede
+    // consultar el historial de alguien ya dado de baja.
+    function poblarSupervisor() {
+      var seleccionPrevia = filtros.supervisor;
+      var vistos = {};
+      var nombres = [];
+      datos.forEach(function (f) {
+        if (!f.supervisor || vistos[f.supervisor]) return;
+        vistos[f.supervisor] = true;
+        nombres.push(f.supervisor);
+      });
+      nombres.sort(function (a, b) { return a.localeCompare(b, 'es'); });
+      elSupervisor.innerHTML = '<option value="Todos">Todos</option>' + nombres.map(function (n) {
+        return '<option value="' + esc(n) + '">' + esc(n) + '</option>';
+      }).join('');
+      filtros.supervisor = (seleccionPrevia === 'Todos' || nombres.indexOf(seleccionPrevia) !== -1) ? seleccionPrevia : 'Todos';
+      elSupervisor.value = filtros.supervisor;
+    }
+
+    // Opciones = "Todos" + meses distintos presentes + el mes actual
+    // (aunque este vacio), orden desc, etiqueta "Agosto 2026".
+    function poblarMes() {
+      var seleccionPrevia = filtros.mesValor;
+      var vistos = {};
+      var lista = [];
+      datos.forEach(function (f) {
+        if (!f.fecha) return;
+        var k = f.fecha.anio + '-' + f.fecha.mes;
+        if (vistos[k]) return;
+        vistos[k] = true;
+        lista.push({ anio: f.fecha.anio, mes: f.fecha.mes });
+      });
+      if (!vistos[claveHoy]) lista.push({ anio: hoy.getFullYear(), mes: hoy.getMonth() + 1 });
+      lista.sort(function (a, b) { return (b.anio * 100 + b.mes) - (a.anio * 100 + a.mes); });
+
+      elMes.innerHTML = '<option value="Todos">Todos</option>' + lista.map(function (m) {
+        return '<option value="' + m.anio + '-' + m.mes + '">' + esc(MESES[m.mes - 1] + ' ' + m.anio) + '</option>';
+      }).join('');
+
+      var claves = lista.map(function (m) { return m.anio + '-' + m.mes; });
+      filtros.mesValor = (seleccionPrevia === 'Todos' || claves.indexOf(seleccionPrevia) !== -1) ? seleccionPrevia : claveHoy;
+      elMes.value = filtros.mesValor;
+    }
+
+    // Selector de semana DEPENDIENTE del mes elegido: lista las semanas ISO
+    // que intersectan el mes (o queda deshabilitado si Mes = "Todos").
+    function poblarSemana() {
+      var seleccionPrevia = filtros.semanaValor;
+      elSemana.innerHTML = '<option value="">Todas</option>';
+      actualizarDisabledSemana();
+      if (filtros.mesValor === 'Todos') {
+        filtros.semanaValor = '';
+        elSemana.value = '';
+        return;
+      }
+      var mp = filtros.mesValor.split('-');
+      var opciones = opcionesSemanaParaMes(Number(mp[0]), Number(mp[1]));
+      opciones.forEach(function (o) {
+        var opt = document.createElement('option');
+        opt.value = o.anioISO + '-' + o.semana;
+        opt.textContent = etiquetaSemana(o);
+        elSemana.appendChild(opt);
+      });
+      var sigueValida = opciones.some(function (o) { return (o.anioISO + '-' + o.semana) === seleccionPrevia; });
+      filtros.semanaValor = sigueValida ? seleccionPrevia : '';
+      elSemana.value = filtros.semanaValor;
+    }
+
+    // Resumen: SIEMPRE tres cifras separadas (nunca una mezclada). Con
+    // Estado=Rechazada el principal da "0,0 hs" y la chip de rechazadas es
+    // la protagonista: es el comportamiento correcto, no un caso especial.
+    function renderResumen(lista) {
+      var aprobadas = 0, pendientes = 0, rechazadas = 0, rechCount = 0;
+      lista.forEach(function (f) {
+        if (f.estado === 'Aprobada') aprobadas += f.horas;
+        else if (f.estado === 'Pendiente') pendientes += f.horas;
+        else if (f.estado === 'Rechazada') { rechazadas += f.horas; rechCount++; }
+      });
+      var chips = '';
+      if (pendientes > 0) {
+        chips += '<span class="chip chip-pendiente">' + svgIcon('clock', 'icon-14') +
+          '+' + fmt(pendientes) + ' hs pendientes</span>';
+      }
+      if (rechCount > 0) {
+        chips += '<span class="chip chip-rechazada">' + svgIcon('x', 'icon-14') +
+          rechCount + (rechCount === 1 ? ' rechazada' : ' rechazadas') + ' · ' + fmt(rechazadas) + ' hs (no suman)</span>';
+      }
+      elResumen.innerHTML =
+        '<div class="kpi-label">Horas aprobadas</div>' +
+        '<div class="kpi-value">' + fmt(aprobadas) + ' hs</div>' +
+        (chips ? '<div class="con-resumen-chips">' + chips + '</div>' : '');
+    }
+
+    // Desglose por supervisor: mismo patron .equipo-item que el resumen del
+    // Calendario (barra --grad-gold sobre horas Aprobadas, sufijo "+Xp" si
+    // ademas tiene Pendientes en el conjunto filtrado).
+    function renderDesglose(lista) {
+      var mapa = {};
+      var orden = [];
+      lista.forEach(function (f) {
+        if (f.estado !== 'Aprobada' && f.estado !== 'Pendiente') return;
+        if (!mapa[f.supervisor]) { mapa[f.supervisor] = { horasAprobadas: 0, horasPendientes: 0 }; orden.push(f.supervisor); }
+        if (f.estado === 'Aprobada') mapa[f.supervisor].horasAprobadas += f.horas;
+        else mapa[f.supervisor].horasPendientes += f.horas;
+      });
+      if (!orden.length) { elDesglose.innerHTML = ''; return; }
+      var arr = orden.map(function (nombre) {
+        return { nombre: nombre, horasAprobadas: mapa[nombre].horasAprobadas, horasPendientes: mapa[nombre].horasPendientes };
+      }).sort(function (a, b) { return b.horasAprobadas - a.horasAprobadas; });
+      var maxHoras = Math.max.apply(null, arr.map(function (p) { return p.horasAprobadas; }).concat([1]));
+      elDesglose.innerHTML = arr.map(function (p, i) {
+        var pct = maxHoras > 0 ? Math.max(4, Math.round((p.horasAprobadas / maxHoras) * 100)) : 4;
+        return '<li class="equipo-item" style="--i:' + i + '">' +
+          '<div class="equipo-info">' + svgIcon('user', 'icon-16') + '<strong>' + esc(p.nombre) + '</strong></div>' +
+          '<div class="equipo-bar-track"><div class="equipo-bar" style="--pct:' + pct + '%"></div></div>' +
+          '<span class="equipo-saldo num">' + fmt(p.horasAprobadas) + ' hs' +
+            (p.horasPendientes > 0 ? '<span class="cal-sup-pend">+' + fmtCorto(p.horasPendientes) + 'p</span>' : '') +
+          '</span>' +
+          '</li>';
+      }).join('');
+    }
+
+    // Lista detallada: patron .solicitud-item, orden fecha desc (id desc de
+    // desempate). El Motivo SIEMPRE pasa por esc(), sin excepcion.
+    function renderLista(lista) {
+      if (!lista.length) {
+        elLista.innerHTML = estadoVacio('Ninguna solicitud cumple estos filtros', 'Probá con otros filtros.');
+        return;
+      }
+      var ordenada = lista.slice().sort(function (a, b) {
+        var ka = claveFecha(a), kb = claveFecha(b);
+        if (ka !== kb) return kb - ka;
+        return a.id < b.id ? 1 : -1;
+      });
+      elLista.innerHTML = ordenada.map(function (f, i) {
+        var info = chipInfo(f.estado);
+        var meta = [f.fechaTexto || '—'];
+        if (f.fecha) meta.push('S' + isoSemana(f.fecha.anio, f.fecha.mes, f.fecha.dia).semana);
+        meta.push(f.supervisor);
+        return '<li class="solicitud-item" style="--i:' + i + '">' +
+          '<div class="sol-main">' +
+            '<span class="sol-tipo">' + esc(f.linea || '-') + '</span>' +
+            '<div class="sol-info"><strong>' + esc(fmt(f.horas) + ' hs · ' + (f.motivo || '')) + '</strong>' +
+            '<span class="sol-meta">' + esc(meta.join(' · ')) + '</span></div>' +
+          '</div>' +
+          '<span class="chip ' + info.clase + '">' + svgIcon(info.icono, 'icon-14') + info.texto + '</span>' +
+          '</li>';
+      }).join('');
+    }
+
+    function aplicarFiltros() {
+      var filtrados = datos.filter(pasaFila);
+      renderResumen(filtrados);
+      renderDesglose(filtrados);
+      renderLista(filtrados);
+    }
+
+    function deshabilitarControles(v) {
+      elSupervisor.disabled = v;
+      elMes.disabled = v;
+      elEstado.disabled = v;
+      elLinea.disabled = v;
+      elLimpiar.disabled = v;
+    }
+
+    elSupervisor.addEventListener('change', function () { filtros.supervisor = elSupervisor.value; aplicarFiltros(); });
+    elMes.addEventListener('change', function () {
+      filtros.mesValor = elMes.value;
+      poblarSemana();
+      aplicarFiltros();
+    });
+    elSemana.addEventListener('change', function () { filtros.semanaValor = elSemana.value; aplicarFiltros(); });
+    elEstado.addEventListener('change', function () { filtros.estado = elEstado.value; aplicarFiltros(); });
+    elLinea.addEventListener('change', function () { filtros.linea = elLinea.value; aplicarFiltros(); });
+    elLimpiar.addEventListener('click', function () {
+      filtros.supervisor = 'Todos';
+      filtros.mesValor = claveHoy;
+      filtros.semanaValor = '';
+      filtros.estado = 'Todos';
+      filtros.linea = 'Todas';
+      elSupervisor.value = 'Todos';
+      elEstado.value = 'Todos';
+      elLinea.value = 'Todas';
+      elMes.value = filtros.mesValor;
+      poblarSemana();
+      aplicarFiltros();
+    });
+
+    async function cargar() {
+      if (cargando) return;
+      cargando = true;
+      deshabilitarControles(true);
+      elSemana.disabled = true;
+      elResumen.innerHTML = calSkeletonHTML();
+      elDesglose.innerHTML = '';
+      elLista.innerHTML = '';
+      try {
+        var data = await llamarServidor('apiConsulta');
+        datos = data.solicitudes || [];
+        poblarSupervisor();
+        poblarMes();
+        poblarSemana(); // define el disabled final de elSemana segun filtros.mesValor
+        aplicarFiltros();
+      } catch (err) {
+        elResumen.innerHTML = calErrorHTML(err.message || 'No se pudo conectar con el servidor.');
+        elDesglose.innerHTML = '';
+        elLista.innerHTML = '';
+      } finally {
+        cargando = false;
+        deshabilitarControles(false);
+      }
+    }
+
+    return { recargar: cargar };
+  }
+
+  // Instanciar solo los paneles cuyo DOM existe (viewSupervisor no tiene Consulta).
+  var conJefe = document.getElementById('conJefeCard') ? crearPanelConsulta('conJefe') : null;
+  var conPersonas = document.getElementById('conPersonasCard') ? crearPanelConsulta('conPersonas') : null;
 
   /* ==================== FORM: CARGAR HORAS EXTRA ==================== */
   var formHE = document.getElementById('formHE');

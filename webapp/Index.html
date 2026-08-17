@@ -156,6 +156,44 @@
         </section>
       </div>
 
+      <section class="card surface" id="conJefeCard" aria-labelledby="conJefeHeading">
+        <div class="section-title"><h2 class="h3" id="conJefeHeading">Consulta</h2></div>
+        <div class="filtros-grid">
+          <label class="filtro-full">Supervisor
+            <select id="conJefeSupervisor"><option value="Todos">Todos</option></select>
+          </label>
+          <label>Mes
+            <select id="conJefeMes"><option value="Todos">Todos</option></select>
+          </label>
+          <label>Semana
+            <select id="conJefeSemana"><option value="">Todas</option></select>
+          </label>
+          <label>Estado
+            <select id="conJefeEstado">
+              <option value="Todos">Todos</option>
+              <option value="Aprobada">Aprobada</option>
+              <option value="Pendiente">Pendiente</option>
+              <option value="Rechazada">Rechazada</option>
+            </select>
+          </label>
+          <label>Linea
+            <select id="conJefeLinea">
+              <option value="Todas">Todas</option>
+              <option value="L1">L1</option>
+              <option value="L2">L2</option>
+              <option value="L3">L3</option>
+              <option value="Varias">Varias</option>
+            </select>
+          </label>
+        </div>
+        <div class="con-limpiar-row">
+          <button type="button" class="btn btn-ghost btn-sm" id="conJefeLimpiar">Limpiar filtros</button>
+        </div>
+        <div id="conJefeResumen" class="con-resumen" aria-live="polite"><!-- via JS --></div>
+        <ul class="equipo-list con-desglose" id="conJefeDesglose"><!-- via JS --></ul>
+        <ul class="solicitudes-list con-lista" id="conJefeLista"><!-- via JS --></ul>
+      </section>
+
       <section class="card cal-card surface" aria-labelledby="calJefeHeading">
         <div class="section-title"><h2 class="h3" id="calJefeHeading">Calendario</h2></div>
         <div class="cal-header">
@@ -213,6 +251,44 @@
             <tbody id="personasTablaBody"><!-- filas via JS --></tbody>
           </table>
         </div>
+      </section>
+
+      <section class="card surface" id="conPersonasCard" aria-labelledby="conPersonasHeading">
+        <div class="section-title"><h2 class="h3" id="conPersonasHeading">Consulta</h2></div>
+        <div class="filtros-grid">
+          <label class="filtro-full">Supervisor
+            <select id="conPersonasSupervisor"><option value="Todos">Todos</option></select>
+          </label>
+          <label>Mes
+            <select id="conPersonasMes"><option value="Todos">Todos</option></select>
+          </label>
+          <label>Semana
+            <select id="conPersonasSemana"><option value="">Todas</option></select>
+          </label>
+          <label>Estado
+            <select id="conPersonasEstado">
+              <option value="Todos">Todos</option>
+              <option value="Aprobada">Aprobada</option>
+              <option value="Pendiente">Pendiente</option>
+              <option value="Rechazada">Rechazada</option>
+            </select>
+          </label>
+          <label>Linea
+            <select id="conPersonasLinea">
+              <option value="Todas">Todas</option>
+              <option value="L1">L1</option>
+              <option value="L2">L2</option>
+              <option value="L3">L3</option>
+              <option value="Varias">Varias</option>
+            </select>
+          </label>
+        </div>
+        <div class="con-limpiar-row">
+          <button type="button" class="btn btn-ghost btn-sm" id="conPersonasLimpiar">Limpiar filtros</button>
+        </div>
+        <div id="conPersonasResumen" class="con-resumen" aria-live="polite"><!-- via JS --></div>
+        <ul class="equipo-list con-desglose" id="conPersonasDesglose"><!-- via JS --></ul>
+        <ul class="solicitudes-list con-lista" id="conPersonasLista"><!-- via JS --></ul>
       </section>
 
       <section class="card cal-card surface" aria-labelledby="calPersonasHeading">
@@ -348,8 +424,11 @@
             <tbody id="calDiaTablaBody"><!-- filas via JS --></tbody>
           </table>
         </div>
+        <div class="calc-row" id="calDiaPendRow" hidden>
+          <span>Pendientes (no suman)</span><b class="num" id="calDiaPend">0,0 hs</b>
+        </div>
         <div class="calc-row calc-result cal-dia-total">
-          <span>Total del dia</span><b class="num" id="calDiaTotal">0,0 hs</b>
+          <span>Total aprobado del dia</span><b class="num" id="calDiaTotal">0,0 hs</b>
         </div>
       </div>
       <div class="modal-footer">

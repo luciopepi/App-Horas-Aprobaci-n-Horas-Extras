@@ -770,6 +770,50 @@
   .cal-resumen-total { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
   .cal-resumen-total b { font-size: 16px; }
 
+  /* El numero del dia y el "+Xp" van en una sola linea: la celda mide ~45px
+     en 390px de ancho y una tercera linea de texto la desborda. */
+  .cal-day-linea-horas { display: flex; align-items: baseline; gap: 3px; }
+  .cal-day-pend { font-size: 8.5px; font-weight: 700; color: var(--amber-text); }
+  .cal-sup-pend { font-size: 10.5px; font-weight: 700; color: var(--amber-text); margin-left: 4px; }
+  .cal-resumen-pend { margin-bottom: 10px; }
+
+  /* ==================== PANEL CONSULTA (Jefe / Personas) ==================== */
+  .filtros-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 8px; margin-bottom: 12px; }
+  .filtro-full { grid-column: 1 / -1; }
+  .filtros-grid label {
+    display: flex; flex-direction: column; gap: 5px;
+    font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.08em; color: var(--muted); min-width: 0;
+  }
+  .filtros-grid select {
+    background: var(--card2); border: 1px solid var(--border);
+    border-radius: var(--radius-input); padding: 9px 10px; color: var(--text);
+    font-size: 13px; font-family: var(--font-sans); min-height: 42px;
+    text-transform: none; letter-spacing: 0; width: 100%; min-width: 0;
+  }
+  .filtros-grid select:focus { border-color: var(--vspt-amber); }
+  .filtros-grid select:disabled { opacity: .45; cursor: not-allowed; }
+
+  .con-limpiar-row { display: flex; justify-content: flex-end; margin-bottom: 12px; }
+
+  /* Resumen filtrado: card-neutral (acento naranja institucional). SIN
+     fondo propio (ni --card2 ni backdrop-filter): ya vive adentro de una
+     .surface, y medido, --card2 hace caer el contraste de la chip
+     chip-rechazada (crimson) a 4.45:1 en modo claro (bajo el 4.5:1 AA);
+     dejando que se vea el fondo de la .surface por debajo, el mismo par
+     da 5.15:1. Solo borde + acento, sin relleno. */
+  .con-resumen {
+    border: 1px solid var(--border);
+    border-top: 3px solid var(--vspt-orange);
+    border-radius: var(--radius-card);
+    padding: 12px 14px;
+    margin-bottom: 14px;
+  }
+  .con-resumen-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+
+  .con-desglose { margin-bottom: 14px; }
+  .con-desglose .cal-sup-pend { margin-left: 4px; }
+
   /* ==================== TABLA (vista Personas) ==================== */
   .tabla-wrap { overflow-x: auto; }
   table.tabla { width: 100%; border-collapse: collapse; min-width: 480px; }

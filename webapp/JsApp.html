@@ -27,6 +27,16 @@
     return (num % 1 === 0) ? String(num) : String(num).replace('.', ',');
   }
 
+  // Crea un <option> por DOM en vez de armar HTML a mano: el valor va por
+  // .value y el texto por .textContent, asi ningun dato escrito por una
+  // persona (un nombre con comillas, por ejemplo) puede romper el atributo.
+  function opcion(valor, texto) {
+    var o = document.createElement('option');
+    o.value = valor;
+    o.textContent = texto;
+    return o;
+  }
+
   // Escapa texto antes de insertarlo con innerHTML. El "Motivo" lo escribe
   // el supervisor y se termina mostrando en la pantalla del Jefe, asi que
   // nunca hay que volcarlo crudo en el HTML.
@@ -472,6 +482,9 @@
   var MESES_ABREV = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
   var DIAS_SEMANA_CORTO = ['LUN', 'MAR', 'MIE', 'JUE', 'VIE', 'SAB', 'DOM'];
   var DIAS_SEMANA_LARGO = ['Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', 'Sabado', 'Domingo'];
+  // Las mismas que valida el alta por la WebApp. El filtro las ofrece siempre,
+  // aunque todavia no haya ninguna solicitud cargada con esa linea.
+  var LINEAS_FIJAS = ['L1', 'L2', 'L3', 'Varias'];
 
   // Semana ISO 8601 a partir de partes de fecha (todo en UTC para que la
   // aritmetica de dias sea exacta, sin corrimientos de zona horaria).
@@ -774,7 +787,10 @@
     function pasaFila(f) {
       if (filtros.supervisor !== 'Todos' && f.supervisor !== filtros.supervisor) return false;
       if (filtros.estado !== 'Todos' && f.estado !== filtros.estado) return false;
-      if (filtros.linea !== 'Todas' && f.linea !== filtros.linea) return false;
+      if (filtros.linea !== 'Todas') {
+        var lin = (f.linea === '' || f.linea == null) ? '(sin linea)' : String(f.linea);
+        if (lin !== filtros.linea) return false;
+      }
       if (filtros.semanaValor) {
         if (!f.fecha) return false;
         var iso = isoSemana(f.fecha.anio, f.fecha.mes, f.fecha.dia);
@@ -809,9 +825,13 @@
         nombres.push(f.supervisor);
       });
       nombres.sort(function (a, b) { return a.localeCompare(b, 'es'); });
-      elSupervisor.innerHTML = '<option value="Todos">Todos</option>' + nombres.map(function (n) {
-        return '<option value="' + esc(n) + '">' + esc(n) + '</option>';
-      }).join('');
+      // Con createElement en vez de innerHTML: esc() escapa &, < y >, pero NO
+      // la comilla doble, y aca el dato entra en un ATRIBUTO. Un nombre con
+      // comillas cortaria el value (el filtro dejaria de encontrar a esa
+      // persona, en silencio) y permitiria colar atributos en el option.
+      elSupervisor.innerHTML = '';
+      elSupervisor.appendChild(opcion('Todos', 'Todos'));
+      nombres.forEach(function (n) { elSupervisor.appendChild(opcion(n, n)); });
       filtros.supervisor = (seleccionPrevia === 'Todos' || nombres.indexOf(seleccionPrevia) !== -1) ? seleccionPrevia : 'Todos';
       elSupervisor.value = filtros.supervisor;
     }
@@ -832,13 +852,41 @@
       if (!vistos[claveHoy]) lista.push({ anio: hoy.getFullYear(), mes: hoy.getMonth() + 1 });
       lista.sort(function (a, b) { return (b.anio * 100 + b.mes) - (a.anio * 100 + a.mes); });
 
-      elMes.innerHTML = '<option value="Todos">Todos</option>' + lista.map(function (m) {
-        return '<option value="' + m.anio + '-' + m.mes + '">' + esc(MESES[m.mes - 1] + ' ' + m.anio) + '</option>';
-      }).join('');
+      elMes.innerHTML = '';
+      elMes.appendChild(opcion('Todos', 'Todos'));
+      lista.forEach(function (m) {
+        elMes.appendChild(opcion(m.anio + '-' + m.mes, MESES[m.mes - 1] + ' ' + m.anio));
+      });
 
       var claves = lista.map(function (m) { return m.anio + '-' + m.mes; });
       filtros.mesValor = (seleccionPrevia === 'Todos' || claves.indexOf(seleccionPrevia) !== -1) ? seleccionPrevia : claveHoy;
       elMes.value = filtros.mesValor;
+    }
+
+    // Opciones = "Todas" + las lineas fijas del alta + cualquier otra que
+    // aparezca en los datos. El alta por la WebApp valida contra la lista
+    // fija, pero la carga por Google Forms escribe el texto crudo: si no
+    // sumaramos lo que hay en los datos, una fila cargada como "Envasado"
+    // solo seria visible bajo "Todas" y nadie se enteraria de que quedo
+    // fuera de la taxonomia.
+    function poblarLinea() {
+      var seleccionPrevia = filtros.linea;
+      var vistos = {}, extras = [];
+      LINEAS_FIJAS.forEach(function (l) { vistos[l] = true; });
+      datos.forEach(function (f) {
+        var l = (f.linea === '' || f.linea == null) ? '(sin linea)' : String(f.linea);
+        if (vistos[l]) return;
+        vistos[l] = true;
+        extras.push(l);
+      });
+      extras.sort(function (a, b) { return a.localeCompare(b, 'es'); });
+
+      elLinea.innerHTML = '';
+      elLinea.appendChild(opcion('Todas', 'Todas'));
+      LINEAS_FIJAS.concat(extras).forEach(function (l) { elLinea.appendChild(opcion(l, l)); });
+
+      filtros.linea = (seleccionPrevia === 'Todas' || vistos[seleccionPrevia]) ? seleccionPrevia : 'Todas';
+      elLinea.value = filtros.linea;
     }
 
     // Selector de semana DEPENDIENTE del mes elegido: lista las semanas ISO
@@ -884,10 +932,26 @@
         chips += '<span class="chip chip-rechazada">' + svgIcon('x', 'icon-14') +
           rechCount + (rechCount === 1 ? ' rechazada' : ' rechazadas') + ' · ' + fmt(rechazadas) + ' hs (no suman)</span>';
       }
+      // Una fila cuya "Fecha HE" no se pudo interpretar queda fuera de
+      // cualquier corte por mes o semana. Si no se avisara, el Jefe veria un
+      // total que le falta algo y no tendria como saberlo: en una app de
+      // liquidacion, el error silencioso es el peor de todos.
+      var sinFecha = 0;
+      datos.forEach(function (f) { if (!f.fecha) sinFecha++; });
+      var aviso = '';
+      if (sinFecha > 0 && (filtros.semanaValor || filtros.mesValor !== 'Todos')) {
+        aviso = '<div class="con-aviso-sinfecha">' + svgIcon('alertTriangle', 'icon-14') +
+          sinFecha + (sinFecha === 1
+            ? ' solicitud con fecha ilegible queda fuera de este corte'
+            : ' solicitudes con fecha ilegible quedan fuera de este corte') +
+          '. Eleg&iacute; Mes = Todos para verlas.</div>';
+      }
+
       elResumen.innerHTML =
         '<div class="kpi-label">Horas aprobadas</div>' +
         '<div class="kpi-value">' + fmt(aprobadas) + ' hs</div>' +
-        (chips ? '<div class="con-resumen-chips">' + chips + '</div>' : '');
+        (chips ? '<div class="con-resumen-chips">' + chips + '</div>' : '') +
+        aviso;
     }
 
     // Desglose por supervisor: mismo patron .equipo-item que el resumen del
@@ -997,6 +1061,7 @@
         var data = await llamarServidor('apiConsulta');
         datos = data.solicitudes || [];
         poblarSupervisor();
+        poblarLinea();
         poblarMes();
         poblarSemana(); // define el disabled final de elSemana segun filtros.mesValor
         aplicarFiltros();
@@ -1004,6 +1069,9 @@
         elResumen.innerHTML = calErrorHTML(err.message || 'No se pudo conectar con el servidor.');
         elDesglose.innerHTML = '';
         elLista.innerHTML = '';
+        // Si fallo la carga, poblarSemana() nunca corrio y el select quedaria
+        // deshabilitado para siempre: lo reactiva actualizarDisabledSemana().
+        actualizarDisabledSemana();
       } finally {
         cargando = false;
         deshabilitarControles(false);

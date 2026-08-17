@@ -469,11 +469,15 @@
   }
   .solicitud-item:last-child { border-bottom: 0; }
   .sol-main { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  /* Ancho flexible con piso de 32px: la caja nacio para codigos de dos
+     letras (HE/CP), pero en la lista de consulta muestra la linea, y el
+     valor mas frecuente es "Varias", que a 10px mide ~32px y se desbordaba
+     por fuera del borde redondeado. */
   .sol-tipo {
-    width: 32px; height: 32px;
+    min-width: 32px; height: 32px; padding: 0 5px;
     border-radius: 8px;
     display: flex; align-items: center; justify-content: center;
-    font-size: 10px; font-weight: 700;
+    font-size: 10px; font-weight: 700; white-space: nowrap;
     background: var(--card2);
     border: 1px solid var(--border);
     flex-shrink: 0;
@@ -785,12 +789,26 @@
     font-size: 11px; font-weight: 700; text-transform: uppercase;
     letter-spacing: 0.08em; color: var(--muted); min-width: 0;
   }
+  /* font-weight: 400 explicito: el reset hace que select herede la fuente
+     del label, que es 700, y en negrita la etiqueta mas larga
+     ("S31 - 27 jul - 2 ago") no entra en la columna a 390px y se elide. */
   .filtros-grid select {
     background: var(--card2); border: 1px solid var(--border);
     border-radius: var(--radius-input); padding: 9px 10px; color: var(--text);
-    font-size: 13px; font-family: var(--font-sans); min-height: 42px;
+    font-size: 13px; font-weight: 400; font-family: var(--font-sans);
+    min-height: 42px;
     text-transform: none; letter-spacing: 0; width: 100%; min-width: 0;
   }
+  /* Aviso de filas que quedan fuera del corte por fecha ilegible. Usa
+     --amber-text, el mismo token calibrado AA que el resto de las
+     advertencias, y lleva icono ademas del color. */
+  .con-aviso-sinfecha {
+    display: flex; align-items: flex-start; gap: 6px;
+    margin-top: 10px; font-size: 11.5px; line-height: 1.4;
+    color: var(--amber-text);
+  }
+  .con-aviso-sinfecha .icon { flex-shrink: 0; margin-top: 1px; }
+
   .filtros-grid select:focus { border-color: var(--vspt-amber); }
   .filtros-grid select:disabled { opacity: .45; cursor: not-allowed; }
 
@@ -969,6 +987,9 @@
     gap: 7px;
   }
   .calc-row { display: flex; justify-content: space-between; font-size: 12.5px; color: var(--muted); }
+  /* Despega la fila de pendientes del borde de la tabla, igual que hace la
+     fila del total que va abajo. */
+  .calc-row-pend { margin-top: 12px; }
   .calc-row b { color: var(--text); font-variant-numeric: tabular-nums; }
   .calc-result { padding-top: 7px; border-top: 1px solid var(--border); font-weight: 700; }
   .calc-box.invalid { border-color: var(--vspt-crimson); }

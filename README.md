@@ -19,6 +19,10 @@ Sistema para que los **supervisores** carguen sus horas extra y días de compens
 - **Resumen mensual** automático enviado al jefe (día 1, 07:00).
 - Directorio de correos y roles administrable desde una hoja propia (`Correos`), sin tocar el código.
 - Vista de solo lectura para **Gerencia de Personas** en la WebApp: saldos de todo el equipo, sin botones de aprobación ni edición.
+- **Liquidación de sábado/domingo/feriado (política FLC-DOC-RH-092, vigente desde `CONFIG.VIGENCIA_LIQUIDACION`):** cada hora extra aprobada cae en una de dos bolsas según su `Fecha HE` (el día en que se trabajó, no el día en que se cargó la solicitud):
+  - **LIQ (se paga):** sábado, domingo o feriado, con `Fecha HE` en o después de la vigencia.
+  - **COMP (suma al saldo, como hoy):** día de semana en o después de la vigencia, o **cualquier** fecha anterior a la vigencia (la política no es retroactiva, ni siquiera si esa fecha cayó sábado/domingo/feriado).
+  - La clasificación se calcula **al vuelo** con `clasificarDia()`/`circuitoHE()` — no hay columna nueva en `Solicitudes` ni migración de datos históricos. Corregir la hoja `Feriados` (alta, baja o fecha mal cargada) reclasifica sola, de inmediato, cualquier solicitud ya existente, sin tocarla.
 
 ## Arquitectura
 
@@ -56,20 +60,31 @@ Sistema para que los **supervisores** carguen sus horas extra y días de compens
 - El script lee esta hoja a través de `_directorio()`, con cache de 5 minutos (`CacheService`). Si editás la hoja y necesitás que el cambio se vea al toque, corré manualmente `invalidarCacheDirectorio()` desde el editor de Apps Script.
 - `setup()` deja una fila de ejemplo con `Activo = NO` y el email `REEMPLAZAR@invalid` (dominio `.invalid`, reservado por RFC 2606: nunca resuelve ni recibe correo real). Reemplazá esa fila por el Jefe real y poné `Activo = SI`. `jefeEmail()` rechaza explícitamente cualquier correo con dominio `.invalid` o `.example`, así que el sistema no puede quedar "funcionando" con el placeholder puesto por error.
 
-> **IMPORTANTE — privacidad:** los correos reales de la empresa **no van en el repositorio ni en el código**, en ningún archivo, comentario o dato de ejemplo. Se cargan a mano en la hoja `Correos` del Google Sheet, que vive solo en la cuenta de Google Workspace de la empresa. Cualquier ejemplo en el código o la documentación usa placeholders (`@ejemplo.com`) y nombres genéricos.
+**Hoja `Feriados`** (política FLC-DOC-RH-092)
+
+`Fecha | Nombre | Fuente`
+
+- `Fecha`: obligatoria, con validación de datos (`requireDate`) y formato `dd/MM/yyyy`. Una fila sin fecha legible se ignora, no rompe nada.
+- `Nombre`: el que se muestra en mails y en la WebApp (badge del calendario, chip "Liquidable").
+- `Fuente`: texto libre para auditar de dónde sale el feriado (ej: `"Decreto 106/2026"`). No se valida ni se usa en ninguna lógica.
+- La crea `setup()` (vía `_ensureHojaFeriados()`), **sin precargar ningún feriado**: es un dato operativo que cambia todos los años y que Gerencia de Personas tiene que cargar y mantener a mano; un feriado hardcodeado en el código se desactualiza en silencio.
+- Se lee a través de `_feriadosMap()`, con el mismo patrón de cache de 5 minutos que `_directorio()` (`CacheService`, clave `feriados_v1`) más un memo por ejecución. Si editás la hoja y necesitás que el cambio se refleje al toque (por ejemplo, para que una solicitud ya cargada pase a liquidable), corré manualmente `invalidarCacheFeriados()` desde el editor de Apps Script.
+- Si la hoja no existe, está vacía, o tiene un encabezado roto, `_feriadosMap()` degrada a `{}` (todo se trata como día de semana) en vez de romper el resto de la WebApp.
+
+> **IMPORTANTE — privacidad:** los correos reales de la empresa **no van en el repositorio ni en el código**, en ningún archivo, comentario o dato de ejemplo. Se cargan a mano en la hoja `Correos` del Google Sheet, que vive solo en la cuenta de Google Workspace de la empresa. Cualquier ejemplo en el código o la documentación usa placeholders (`@ejemplo.invalid`) y nombres genéricos.
 
 Convenciones:
 - `ID`: prefijo `HE-` o `CP-` + `yyMMdd-HHmmss`. El prefijo enruta en `doGet`.
 - `Estado`: `Pendiente` | `Aprobada` | `Rechazada`.
 - `Token`: UUID, siempre en la última columna.
-- **Saldo** = Σ `Horas` aprobadas (`Solicitudes`) − Σ `Horas a compensar` aprobadas (`Compensaciones`), por `Email`. Fuente de verdad: `saldoSupervisor(email)` y `validarCompensacion(email, horas)`.
+- **Saldo (compensable)** = Σ `Horas` aprobadas de `Solicitudes` que caen en el circuito **COMP** (ver "Liquidación de sábado/domingo/feriado" arriba) − Σ `Horas a compensar` aprobadas (`Compensaciones`), por `Email`. Las horas del circuito **LIQ** (sábado/domingo/feriado con `Fecha HE` en o después de la vigencia) **no** entran en este saldo: se pagan aparte. Fuente de verdad: `_desgloseHE(email)` (desglose por circuito), `saldoSupervisor(email)` (saldo compensable) y `validarCompensacion(email, horas)`.
 
 ## Instalación
 
 1. Crear un Google Sheet llamado `DB_HorasExtra`.
 2. **Extensiones → Apps Script** y pegar [`ControlHorasExtra.gs`](ControlHorasExtra.gs).
-3. Ejecutar `setup()` una vez (crea las 4 hojas con encabezados: `Solicitudes`, `Compensaciones`, `Auditoria`, `Correos`).
-4. Completar la hoja `Correos` con los correos y roles reales del equipo (al menos un `Jefe` activo). Los correos **no se cargan en el código**.
+3. Ejecutar `setup()` una vez (crea las 5 hojas con encabezados: `Solicitudes`, `Compensaciones`, `Auditoria`, `Correos`, `Feriados`). `setup()` es idempotente: volver a correrla en una planilla ya en producción no toca las hojas existentes, solo crea las que todavía no existan.
+4. Completar la hoja `Correos` con los correos y roles reales del equipo (al menos un `Jefe` activo). Los correos **no se cargan en el código**. Completar también la hoja `Feriados` con los feriados vigentes (columna `Fecha` obligatoria).
 5. Crear los 2 Google Forms y vincular sus respuestas a este Sheet. Las hojas destino deben contener `HE` o `COMP` en el nombre (así rutea `onFormSubmitHE`).
 6. Crear 3 archivos HTML en el **mismo** proyecto de Apps Script (▸ **Archivo → Nuevo → Archivo HTML**), con estos nombres exactos, y pegarles el contenido de los archivos homónimos de la carpeta [`webapp/`](webapp/) del repo. Apps Script no tiene subcarpetas: los archivos van sueltos, la carpeta `webapp/` es solo organización del repositorio.
    - `Index.html` ← [`webapp/Index.html`](webapp/Index.html)
@@ -88,6 +103,7 @@ Convenciones:
 | `NOMBRE_PLANTA` | Nombre que aparece en mails y resúmenes |
 | `HORAS_POR_DIA` | Equivalencia día → horas para compensación (8) |
 | `TZ` | `America/Argentina/San_Juan` |
+| `VIGENCIA_LIQUIDACION` | Fecha desde la que rige la política FLC-DOC-RH-092 (formato `yyyy-MM-dd` **estricto** — `_vigenciaNum()` lanza un error visible si no lo respeta). Horas de sábado/domingo/feriado con `Fecha HE` en o después de esta fecha se liquidan; cualquier fecha anterior sigue sumando al saldo compensable, no es retroactiva. |
 
 Los correos del jefe y de Gerencia de Personas **ya no están en `CONFIG`**: se leen dinámicamente de la hoja `Correos` mediante `jefeEmail()` y `personasEmails()`.
 
@@ -109,9 +125,9 @@ No hay selector de rol en la WebApp — a diferencia del prototipo, que lo tiene
 
 | Rol | Ve |
 |---|---|
-| Supervisor | Su saldo (generadas/compensadas/disponible) y sus propias solicitudes y compensaciones. Puede cargar horas extra y pedir compensación. |
-| Jefe | La bandeja de pendientes (para aprobar/rechazar) y los saldos de todo el equipo. También puede cargar sus propias horas extra y compensaciones. |
-| Personas | Solo lectura: KPIs de planta (HE del mes, pendientes, saldo total) y la tabla de saldos por supervisor. Sin botones de acción. |
+| Supervisor | Su saldo **compensable** (generadas/compensadas/disponible, solo días de semana) más el desglose de horas en **liquidación** (sábado/domingo y feriado, desde la vigencia de FLC-DOC-RH-092) y sus propias solicitudes y compensaciones. Puede cargar horas extra y pedir compensación. Una tarjeta descartable (una vez por navegador, vía `localStorage`) avisa del cambio de política mientras tenga horas en liquidación. |
+| Jefe | La bandeja de pendientes (para aprobar/rechazar) y los saldos de todo el equipo, con el desglose de liquidación por supervisor. También puede cargar sus propias horas extra y compensaciones. |
+| Personas | Solo lectura: KPIs de planta (HE del mes, pendientes, saldo compensable total, total en liquidación) y la tabla de saldos por supervisor (compensable + liquidación desglosada). Sin botones de acción. |
 
 Si la cuenta no está en la hoja `Correos` (o está pero con `Activo = NO`), la WebApp muestra una pantalla de error explicando que hay que pedir el alta, en vez de una pantalla en blanco o rota.
 
@@ -121,7 +137,7 @@ Todas las funciones expuestas abajo arrancan resolviendo `_identificar()`: el em
 
 | Función | Quién puede llamarla | Qué valida en el servidor |
 |---|---|---|
-| `apiEstado()` | Cualquier cuenta identificada (con rol en `Correos`) | Devuelve datos distintos según el rol de la sesión: un Supervisor nunca recibe `equipo` ni `pendientes`; un Supervisor jamás recibe los datos de otro Supervisor (todo se filtra por email, del lado del servidor). |
+| `apiEstado()` | Cualquier cuenta identificada (con rol en `Correos`) | Devuelve datos distintos según el rol de la sesión: un Supervisor nunca recibe `equipo` ni `pendientes`; un Supervisor jamás recibe los datos de otro Supervisor (todo se filtra por email, del lado del servidor). `saldo.generadas/compensadas/disponible` conservan sus nombres históricos (el cliente los usa así) pero `generadas` ahora es **solo compensable**; `saldo.liqSabDom/liqFeriado/liqTotal` son campos nuevos, aditivos. |
 | `apiCrearHoraExtra({fecha, horas, linea, motivo})` | Supervisor o Jefe | Fecha válida y no futura; horas numérico entre 0,5 y 24; línea en `L1`/`L2`/`L3`/`Varias`; motivo no vacío. El email y el nombre son siempre los de la sesión, nunca los que mande el payload. |
 | `apiCrearCompensacion({fecha, tipo})` | Supervisor o Jefe | Fecha válida; tipo `completo` o `medio`. Las **horas las calcula el servidor** a partir del tipo (nunca un número que mande el cliente, para que no se pueda manipular el saldo con un payload armado a mano). **Bloquea si el saldo no alcanza** — es el único lugar del sistema donde el bloqueo es correcto, porque acá es reversible. |
 | `apiResolver(id, accion, confirmar)` | Solo Jefe | `accion` en `aprobar`/`rechazar`; idempotencia (si la solicitud ya no está Pendiente, error claro); lock para evitar carreras; si es una compensación con saldo insuficiente, no aprueba ni rechaza sola — devuelve un estado intermedio (`requiereConfirmacion`) que la UI muestra como "aprobar en descubierto", y recién con `confirmar=true` se aprueba, quedando `APROBADA_SALDO_NEGATIVO` en `Auditoria`. |

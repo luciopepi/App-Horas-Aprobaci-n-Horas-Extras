@@ -54,6 +54,17 @@ const CONFIG = {
   HORAS_POR_DIA: 8,        // equivalencia para compensacion en dias
   TZ:            'America/Argentina/San_Juan',
 
+  // Politica FLC-DOC-RH-092: desde esta fecha (inclusive), las horas extra
+  // de sabado, domingo o feriado se LIQUIDAN (se pagan) y dejan de sumar al
+  // saldo de compensacion. Las de dia de semana, y CUALQUIER hora anterior
+  // a esta fecha (aunque haya caido sabado/domingo/feriado), siguen sumando
+  // al saldo como siempre. Ver clasificarDia()/circuitoHE(), fuente unica
+  // de esta clasificacion.
+  // Formato yyyy-MM-dd ESTRICTO (lo parsea _vigenciaNum() con una regex
+  // fija). No usar Date aca: comparar fechas como Date arrastra la zona
+  // horaria del servidor (ver nota de TZ en clasificarDia).
+  VIGENCIA_LIQUIDACION: '2026-08-01',
+
   // Icono de la app: es el que usa Chrome para el acceso directo que queda
   // en la pantalla del celular. Si queda vacio, Android muestra uno
   // generico y la app funciona igual.
@@ -65,7 +76,7 @@ const CONFIG = {
   ICONO_URL:     ''
 };
 
-const SH = { SOL: 'Solicitudes', COMP: 'Compensaciones', LOG: 'Auditoria', COR: 'Correos' };
+const SH = { SOL: 'Solicitudes', COMP: 'Compensaciones', LOG: 'Auditoria', COR: 'Correos', FER: 'Feriados' };
 
 const COL_SOL  = ['ID','Timestamp','Supervisor','Email','Fecha HE','Horas','Linea','Motivo',
                   'Estado','Aprobado por','Fecha aprobacion','Comentario','Token'];
@@ -73,11 +84,18 @@ const COL_COMP = ['ID','Timestamp','Supervisor','Email','Fecha solicitada','Hora
                   'Tipo','Estado','Aprobado por','Fecha aprobacion','Comentario','Token'];
 const COL_LOG  = ['Timestamp','ID','Accion','Usuario','Detalle'];
 const COL_COR  = ['Email','Nombre','Rol','Activo'];
+// Hoja "Feriados": un feriado por fila. Solo "Fecha" es obligatoria; "Nombre"
+// es el que se muestra en mails/UI; "Fuente" es texto libre para auditar de
+// donde sale (ej: "Decreto 106/2026"), no se valida ni se usa en logica.
+const COL_FER  = ['Fecha', 'Nombre', 'Fuente'];
 
 const ROLES_VALIDOS = ['Supervisor', 'Jefe', 'Personas'];
 
 const CACHE_KEY_DIRECTORIO = 'directorio_correos';
 const CACHE_TTL_DIRECTORIO = 300; // segundos
+
+const CACHE_KEY_FERIADOS = 'feriados_v1';
+const CACHE_TTL_FERIADOS = 300; // segundos
 
 // ==================== NORMALIZACION ====================
 /**
@@ -229,9 +247,15 @@ function setup() {
   _ensureSheet(ss, SH.COMP, COL_COMP);
   _ensureSheet(ss, SH.LOG,  COL_LOG);
   _ensureHojaCorreos(ss);
+  // _ensureSheet ya es idempotente (solo escribe encabezados si la hoja
+  // esta vacia), asi que volver a correr setup() en un Sheet en produccion
+  // no toca las hojas existentes: solo crea "Feriados" si todavia no existe.
+  _ensureHojaFeriados(ss);
   SpreadsheetApp.getUi().alert(
     'Hojas creadas. Completar la hoja "Correos" con los correos reales ' +
-    '(al menos un Jefe activo) y revisar CONFIG.WEBAPP_URL tras implementar la WebApp.'
+    '(al menos un Jefe activo), cargar los feriados en la hoja "Feriados" ' +
+    '(Fecha + Nombre; ver politica FLC-DOC-RH-092) y revisar ' +
+    'CONFIG.WEBAPP_URL tras implementar la WebApp.'
   );
 }
 
@@ -275,6 +299,30 @@ function _ensureHojaCorreos(ss) {
     // correo real del Jefe y poner Activo=SI.
     sh.appendRow(['REEMPLAZAR@invalid', 'M. Rivas', 'Jefe', 'NO']);
   }
+}
+
+/**
+ * Crea (si no existe) la hoja "Feriados" usada por _feriadosMap()/
+ * clasificarDia() para saber que "Fecha HE" es feriado. Mismo patron que
+ * _ensureHojaCorreos: _ensureSheet ya es idempotente, esta funcion solo
+ * agrega validacion de datos sobre la columna Fecha.
+ *
+ * A PROPOSITO no precarga ningun feriado (ni siquiera de ejemplo con fecha
+ * real): la lista de feriados es un dato operativo que cambia todos los
+ * anios y que Gerencia de Personas tiene que cargar y mantener a mano; un
+ * feriado hardcodeado en el codigo se desactualiza en silencio.
+ */
+function _ensureHojaFeriados(ss) {
+  const sh = _ensureSheet(ss, SH.FER, COL_FER);
+  const filas = Math.max(sh.getMaxRows() - 1, 1);
+
+  const colFecha = _idx(COL_FER, 'Fecha') + 1;
+  const reglaFecha = SpreadsheetApp.newDataValidation()
+    .requireDate()
+    .setAllowInvalid(false)
+    .build();
+  sh.getRange(2, colFecha, filas, 1).setDataValidation(reglaFecha);
+  sh.getRange(2, colFecha, filas, 1).setNumberFormat('dd/MM/yyyy');
 }
 
 // ==================== DIRECTORIO (hoja Correos) ====================
@@ -356,6 +404,190 @@ function invalidarCacheDirectorio() {
   } catch (err) {
     // sin cache no hay nada que borrar
   }
+}
+
+// ==================== FERIADOS (hoja Feriados) ====================
+// Memo por ejecucion: una sola lectura de la hoja/cache basta para
+// clasificar todas las filas que haga falta clasificar dentro de la misma
+// llamada a apiEstado/apiCalendario/apiConsulta/etc. Se reinicia solo (cada
+// invocacion del script corre en un contexto nuevo); invalidarCacheFeriados()
+// lo limpia ademas por si alguna ejecucion larga reutiliza contexto.
+let _feriadosMemo = null;
+
+/**
+ * Mapa 'yyyy-MM-dd' -> nombre del feriado ('' si la fila no tiene Nombre).
+ * Espejo exacto del patron de _directorio(): cache de scriptCache (300s),
+ * si falla o no hay cache lee la hoja "Feriados" directo.
+ *
+ * Degrada a {} (nunca lanza) si la hoja no existe, si esta vacia, o si sus
+ * encabezados estan rotos: un feriado mal cargado no puede tumbar apiEstado
+ * entero para todo el mundo. Un feriado que "no se ve" por un encabezado
+ * roto es un problema visible y corregible (basta arreglar el encabezado);
+ * apiEstado caido para todos es mucho peor.
+ *
+ * No cachea un mapa vacio, por la misma razon que _directorio(): si alguien
+ * carga la hoja recien despues de que quedo cacheada vacia, no queremos
+ * que el sistema seguera "sin feriados" hasta 5 minutos despues.
+ *
+ * @returns {Object<string,string>}
+ */
+function _feriadosMap() {
+  if (_feriadosMemo) return _feriadosMemo;
+
+  const cache = _cacheSeguro();
+  if (cache) {
+    try {
+      const cacheado = cache.get(CACHE_KEY_FERIADOS);
+      if (cacheado) {
+        _feriadosMemo = JSON.parse(cacheado);
+        return _feriadosMemo;
+      }
+    } catch (err) {
+      // si falla la lectura del cache, seguimos y leemos la hoja
+    }
+  }
+
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SH.FER);
+  if (!sh) return {};
+  const data = sh.getDataRange().getValues();
+  if (data.length < 2) return {};
+
+  const mapa = {};
+  try {
+    const enc = data[0];
+    const cFecha  = _idx(enc, 'Fecha');
+    const cNombre = _idx(enc, 'Nombre');
+
+    for (let i = 1; i < data.length; i++) {
+      const partes = _partesFecha(data[i][cFecha]);
+      if (!partes) continue; // fila sin fecha legible: se ignora, no rompe nada
+      const clave = partes.anio + '-' + _pad2(partes.mes) + '-' + _pad2(partes.dia);
+      mapa[clave] = String(data[i][cNombre] || '').trim();
+    }
+  } catch (err) {
+    // Encabezado de "Feriados" roto (columna renombrada/borrada): degrada a
+    // {} y deja traza, en vez de tumbar apiEstado para todo el mundo.
+    console.error('_feriadosMap: encabezados de "Feriados" invalidos: ' + err.message);
+    return {};
+  }
+
+  if (cache && Object.keys(mapa).length > 0) {
+    try {
+      cache.put(CACHE_KEY_FERIADOS, JSON.stringify(mapa), CACHE_TTL_FERIADOS);
+    } catch (err) {
+      // sin cache disponible no es critico
+    }
+  }
+
+  _feriadosMemo = mapa;
+  return mapa;
+}
+
+function _pad2(n) {
+  return (n < 10 ? '0' : '') + n;
+}
+
+/**
+ * Correr manualmente despues de editar la hoja "Feriados" (alta, baja o
+ * correccion de una fecha) para que el cambio se refleje de inmediato en
+ * clasificarDia()/circuitoHE() y en todo lo que dependa de ellos (saldos,
+ * resumenMensual, calendario, panel de consulta). Sin esto, el cache vence
+ * solo a los 5 minutos. Ver caso de prueba 6 del plan: cargar un feriado
+ * nuevo + invalidarCacheFeriados() reclasifica al toque una solicitud ya
+ * cargada, sin tocarla.
+ */
+function invalidarCacheFeriados() {
+  _feriadosMemo = null;
+  const cache = _cacheSeguro();
+  if (!cache) return;
+  try {
+    cache.remove(CACHE_KEY_FERIADOS);
+  } catch (err) {
+    // sin cache no hay nada que borrar
+  }
+}
+
+// ==================== CLASIFICACION DE DIA / CIRCUITO (FLC-DOC-RH-092) ====================
+/**
+ * CONFIG.VIGENCIA_LIQUIDACION como entero comparable (anio*10000+mes*100+dia).
+ * Comparar la vigencia como ENTEROS, nunca como Date: un Date arrastra la
+ * zona horaria del servidor y puede correr la fecha un dia. Lanza un error
+ * visible si CONFIG.VIGENCIA_LIQUIDACION no tiene el formato yyyy-MM-dd
+ * exacto, en vez de fallar en silencio con NaN.
+ * @returns {number}
+ */
+function _vigenciaNum() {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(CONFIG.VIGENCIA_LIQUIDACION || ''));
+  if (!m) throw new Error('CONFIG.VIGENCIA_LIQUIDACION invalida: tiene que tener formato yyyy-MM-dd. Valor actual: "' + CONFIG.VIGENCIA_LIQUIDACION + '"');
+  return Number(m[1]) * 10000 + Number(m[2]) * 100 + Number(m[3]);
+}
+
+/**
+ * Clasifica un valor de "Fecha HE" por tipo de dia.
+ * FUENTE DE VERDAD UNICA: todo lo que necesite saber si un dia es sabado,
+ * domingo, feriado o dia de semana pasa por aca. No reimplementar en el
+ * cliente ni en otra funcion.
+ *
+ * TZ: NO usa Date.getDay() sobre el valor crudo. Extrae {anio,mes,dia} con
+ * _partesFecha() y calcula el dia de semana con aritmetica UTC pura:
+ *   new Date(Date.UTC(anio, mes-1, dia)).getUTCDay()
+ * Asi el resultado depende SOLO del triple (anio,mes,dia), nunca de la zona
+ * horaria del servidor ni de la hora del dia.
+ *
+ * Precedencia: Feriado > Sabado > Domingo > Semana (un feriado que cae
+ * sabado se reporta Feriado, no Sabado).
+ *
+ * @param {*} v valor crudo de "Fecha HE" (Date de celda o texto)
+ * @returns {{tipo:'Feriado'|'Sabado'|'Domingo'|'Semana'|'Desconocido',
+ *            feriadoNombre:string|null, clave:string|null,
+ *            partes:{anio:number,mes:number,dia:number}|null}}
+ */
+function clasificarDia(v) {
+  const partes = _partesFecha(v);
+  if (!partes) {
+    return { tipo: 'Desconocido', feriadoNombre: null, clave: null, partes: null };
+  }
+
+  const clave = partes.anio + '-' + _pad2(partes.mes) + '-' + _pad2(partes.dia);
+  const feriados = _feriadosMap();
+  if (Object.prototype.hasOwnProperty.call(feriados, clave)) {
+    return { tipo: 'Feriado', feriadoNombre: feriados[clave] || '', clave: clave, partes: partes };
+  }
+
+  const dow = new Date(Date.UTC(partes.anio, partes.mes - 1, partes.dia)).getUTCDay();
+  let tipo;
+  if (dow === 6) tipo = 'Sabado';
+  else if (dow === 0) tipo = 'Domingo';
+  else tipo = 'Semana';
+
+  return { tipo: tipo, feriadoNombre: null, clave: clave, partes: partes };
+}
+
+/**
+ * A que bolsa va una hora extra segun su Fecha HE (FLC-DOC-RH-092).
+ *  - fecha < CONFIG.VIGENCIA_LIQUIDACION -> 'COMP' siempre (no retroactiva)
+ *  - fecha >= vigencia y Sabado/Domingo/Feriado -> 'LIQ'
+ *  - fecha >= vigencia y Semana -> 'COMP'
+ *  - Desconocido (fecha ilegible) -> 'COMP' (no se paga lo inverificable)
+ *
+ * @param {*} v valor crudo de "Fecha HE"
+ * @returns {{circuito:'LIQ'|'COMP', tipo:string, feriadoNombre:string|null,
+ *            preVigencia:boolean, clave:string|null}}
+ */
+function circuitoHE(v) {
+  const c = clasificarDia(v);
+
+  if (c.tipo === 'Desconocido') {
+    return { circuito: 'COMP', tipo: c.tipo, feriadoNombre: null, preVigencia: false, clave: null };
+  }
+
+  const fechaNum = c.partes.anio * 10000 + c.partes.mes * 100 + c.partes.dia;
+  const preVigencia = fechaNum < _vigenciaNum();
+
+  const esFindeOFeriado = (c.tipo === 'Sabado' || c.tipo === 'Domingo' || c.tipo === 'Feriado');
+  const circuito = (!preVigencia && esFindeOFeriado) ? 'LIQ' : 'COMP';
+
+  return { circuito: circuito, tipo: c.tipo, feriadoNombre: c.feriadoNombre, preVigencia: preVigencia, clave: c.clave };
 }
 
 function jefeEmail() {
@@ -458,6 +690,12 @@ function _crearHoraExtra(datos) {
   const fechaTexto  = _fmtFecha(fecha);
   const horasTexto  = _fmtHoras(horas);
 
+  // Clasificar el valor ORIGINAL que ya tenemos en memoria (fecha), NUNCA
+  // releer la fila recien escrita: son el mismo dato, releer solo agrega
+  // una vuelta a la hoja para nada y arriesga una inconsistencia si algo
+  // cambia entre el appendRow y la lectura.
+  const c = circuitoHE(fecha);
+
   // Resolver el destinatario ANTES de escribir la fila: si no hay Jefe
   // configurado en la hoja "Correos", mejor que falle aca (nada se guarda)
   // a que quede una solicitud huerfana: escrita pero sin nadie que la
@@ -467,12 +705,26 @@ function _crearHoraExtra(datos) {
   sh.appendRow([id, new Date(), supervisor, email, fecha, horas, linea, motivo,
                 'Pendiente', '', '', '', token]);
 
-  _log(id, 'ALTA_HE', email, horasTexto + ' hs - ' + fechaTexto);
+  _log(id, 'ALTA_HE', email, horasTexto + ' hs - ' + fechaTexto + ' [' + c.circuito + '/' + c.tipo + ']');
+
+  // El mail SI dice el circuito: el Jefe esta autorizando dos cosas
+  // distintas (un pago o un descanso a cuenta de saldo), y tiene que poder
+  // distinguirlas de un vistazo antes de aprobar.
+  let lineaTipoDia;
+  if (c.circuito === 'LIQ') {
+    lineaTipoDia = c.tipo + (c.feriadoNombre ? ' (' + c.feriadoNombre + ')' : '') + ' — LIQUIDABLE (se paga)';
+  } else if (c.tipo === 'Semana') {
+    lineaTipoDia = 'Dia de semana — compensable (suma al saldo)';
+  } else {
+    lineaTipoDia = c.tipo + ' — compensable (anterior a la vigencia ' +
+      CONFIG.VIGENCIA_LIQUIDACION.split('-').reverse().join('/') + ')';
+  }
 
   try {
     MailApp.sendEmail({
       to: destinatarioJefe,
-      subject: '[HE Pendiente] ' + supervisor + ' - ' + horasTexto + ' hs - ' + fechaTexto,
+      subject: (c.circuito === 'LIQ' ? '[HE Pendiente · LIQUIDABLE] ' : '[HE Pendiente] ') +
+        supervisor + ' - ' + horasTexto + ' hs - ' + fechaTexto,
       htmlBody: _mailAprobacion({
         titulo: 'Solicitud de Horas Extra',
         id: id, token: token, tipo: 'HE',
@@ -481,7 +733,8 @@ function _crearHoraExtra(datos) {
           ['Fecha HE', fechaTexto],
           ['Horas', horasTexto],
           ['Linea / Sector', linea],
-          ['Motivo', motivo]
+          ['Motivo', motivo],
+          ['Tipo de dia', lineaTipoDia]
         ]
       })
     });
@@ -600,8 +853,10 @@ function validarCompensacion(email, horas) {
     return {
       ok: false,
       saldo: saldo,
-      mensaje: 'Saldo insuficiente: disponible ' + _fmtHoras(saldo) +
-               ' hs, solicitado ' + _fmtHoras(horasNum) + ' hs.'
+      mensaje: 'Saldo compensable insuficiente: disponible ' + _fmtHoras(saldo) +
+               ' hs, solicitado ' + _fmtHoras(horasNum) + ' hs. (Las horas de ' +
+               'sab/dom/feriado desde el ' + CONFIG.VIGENCIA_LIQUIDACION.split('-').reverse().join('/') +
+               ' se liquidan y no se pueden compensar.)'
     };
   }
   return { ok: true, saldo: saldo, mensaje: 'Saldo suficiente.' };
@@ -736,6 +991,15 @@ function doGet(e) {
   }
 }
 
+/** Nombre de un tipo de dia en minuscula, para meterlo en una oracion (mail). */
+function _tipoDiaTextoLower(tipo) {
+  if (tipo === 'Sabado') return 'sabado';
+  if (tipo === 'Domingo') return 'domingo';
+  if (tipo === 'Feriado') return 'feriado';
+  if (tipo === 'Semana') return 'dia de semana';
+  return 'fecha no interpretable';
+}
+
 function _notificarResultado(fila, estado, esComp, enc) {
   const cSupervisor = _idx(enc, 'Supervisor');
   const cEmail      = _idx(enc, 'Email');
@@ -746,11 +1010,41 @@ function _notificarResultado(fila, estado, esComp, enc) {
   const fecha = _fmtFecha(fila[cFecha]);
   const horas = _fmtHoras(fila[cHoras]);
   const asunto = (esComp ? '[Compensacion ' : '[Horas Extra ') + estado + '] ' + fecha;
+
+  let cuerpoExtra = '';
+  let lineaSaldo;
+  if (esComp) {
+    lineaSaldo = 'Saldo compensable: <b>' + _fmtHoras(saldoSupervisor(email)) + ' hs</b>.';
+  } else {
+    // Rama HE: el mail SI dice el circuito (el Jefe autorizo un pago o un
+    // descanso a cuenta de saldo: son cosas distintas y el supervisor
+    // tiene que poder distinguirlas).
+    const c = circuitoHE(fila[cFecha]);
+    const tipoTexto = _tipoDiaTextoLower(c.tipo) + (c.tipo === 'Feriado' && c.feriadoNombre ? ' (' + c.feriadoNombre + ')' : '');
+    if (c.circuito === 'LIQ') {
+      cuerpoExtra = '<p>Esta solicitud corresponde a <b>' + tipoTexto + '</b>: entra en ' +
+        '<b>liquidacion</b> (se paga). No suma al saldo de compensacion.</p>';
+    } else if (c.tipo === 'Semana') {
+      cuerpoExtra = '<p>Esta solicitud corresponde a <b>' + tipoTexto + '</b>: suma al saldo de compensacion.</p>';
+    } else if (c.tipo === 'Desconocido') {
+      cuerpoExtra = '<p>No pudimos interpretar la fecha de esta solicitud: se trata como compensable.</p>';
+    } else {
+      cuerpoExtra = '<p>Esta solicitud corresponde a <b>' + tipoTexto + '</b>, pero es anterior a la ' +
+        'vigencia del ' + CONFIG.VIGENCIA_LIQUIDACION.split('-').reverse().join('/') +
+        ': suma al saldo de compensacion (no es retroactiva).</p>';
+    }
+    const d = _desgloseHE(email);
+    lineaSaldo = 'Saldo compensable: <b>' + _fmtHoras(saldoSupervisor(email)) + ' hs</b> &middot; ' +
+      'En liquidacion desde el ' + CONFIG.VIGENCIA_LIQUIDACION.split('-').reverse().join('/') +
+      ': <b>' + _fmtHoras(d.liqTotal) + ' hs</b>.';
+  }
+
   const cuerpo =
     '<p>Hola ' + supervisor + ',</p>' +
     '<p>Tu solicitud del <b>' + fecha + '</b> (' + horas + ' hs) fue <b>' +
     estado.toLowerCase() + '</b>.</p>' +
-    '<p>Saldo actual de horas extra: <b>' + _fmtHoras(saldoSupervisor(email)) + ' hs</b>.</p>' +
+    cuerpoExtra +
+    '<p>' + lineaSaldo + '</p>' +
     '<p style="font-size:11px;color:#777">' + CONFIG.NOMBRE_PLANTA + '</p>';
 
   const opciones = { to: email, subject: asunto, htmlBody: cuerpo };
@@ -784,41 +1078,129 @@ function _sumaAprobadas(hoja, email) {
   return total;
 }
 
-function saldoSupervisor(email) {
-  return _sumaAprobadas(SH.SOL, email) - _sumaAprobadas(SH.COMP, email);
+/**
+ * Suma de horas APROBADAS de Solicitudes de un email, desglosada por
+ * circuito (FLC-DOC-RH-092), en UNA sola pasada por la hoja. Reemplaza a
+ * _sumaAprobadas(SH.SOL, email) en todo calculo de saldo/generadas — esa
+ * funcion queda vigente SOLO para Compensaciones (_sumaAprobadas(SH.COMP,...)).
+ *
+ * @param {string} email
+ * @returns {{compensables:number, liqSabDom:number, liqFeriado:number,
+ *            liqTotal:number, sinFecha:number}}
+ */
+function _desgloseHE(email) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const buscado = _normEmail(email);
+  const d = ss.getSheetByName(SH.SOL).getDataRange().getValues();
+  const out = { compensables: 0, liqSabDom: 0, liqFeriado: 0, liqTotal: 0, sinFecha: 0 };
+  if (d.length < 2) return out;
+
+  const enc = d[0];
+  const cEmail  = _idx(enc, 'Email');
+  const cEstado = _idx(enc, 'Estado');
+  const cHoras  = _idx(enc, 'Horas');
+  const cFecha  = _idx(enc, 'Fecha HE');
+
+  for (let i = 1; i < d.length; i++) {
+    if (_normEmail(d[i][cEmail]) !== buscado) continue;
+    if (d[i][cEstado] !== 'Aprobada') continue;
+    const horas = parseFloat(d[i][cHoras]) || 0;
+    const c = circuitoHE(d[i][cFecha]);
+
+    if (c.tipo === 'Desconocido') out.sinFecha++;
+
+    if (c.circuito === 'LIQ') {
+      if (c.tipo === 'Feriado') out.liqFeriado += horas;
+      else out.liqSabDom += horas;
+    } else {
+      out.compensables += horas;
+    }
+  }
+  out.liqTotal = out.liqSabDom + out.liqFeriado;
+  return out;
 }
 
+/**
+ * Desde FLC-DOC-RH-092 este saldo es SOLO compensable: las horas
+ * liquidables (sabado/domingo/feriado con Fecha HE >= vigencia) NO entran
+ * aca, se pagan por otro circuito. Ver _desgloseHE()/circuitoHE().
+ */
+function saldoSupervisor(email) {
+  return _desgloseHE(email).compensables - _sumaAprobadas(SH.COMP, email);
+}
+
+/**
+ * Mapa email -> {nombre, generadas, compensadas, liqSabDom, liqFeriado} de
+ * horas Aprobadas. IMPORTANTE (FLC-DOC-RH-092): "generadas" pasa a contar
+ * SOLO horas compensables (se mantiene el nombre de la clave para no romper
+ * resumenMensual, que la lee por ese nombre). Las horas liquidables quedan
+ * aparte en liqSabDom/liqFeriado.
+ */
 function tablaSaldos() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const map = {};
-  const rec = (hoja, signo) => {
-    const d = ss.getSheetByName(hoja).getDataRange().getValues();
-    if (d.length < 2) return;
-    const enc = d[0];
+
+  const dSol = ss.getSheetByName(SH.SOL).getDataRange().getValues();
+  if (dSol.length >= 2) {
+    const enc = dSol[0];
     const cEmail  = _idx(enc, 'Email');
     const cNombre = _idx(enc, 'Supervisor');
     const cEstado = _idx(enc, 'Estado');
-    const cHoras  = _idx(enc, hoja === SH.SOL ? 'Horas' : 'Horas a compensar');
-    for (let i = 1; i < d.length; i++) {
-      if (d[i][cEstado] !== 'Aprobada') continue;
-      const k = _normEmail(d[i][cEmail]);
+    const cHoras  = _idx(enc, 'Horas');
+    const cFecha  = _idx(enc, 'Fecha HE');
+    for (let i = 1; i < dSol.length; i++) {
+      if (dSol[i][cEstado] !== 'Aprobada') continue;
+      const k = _normEmail(dSol[i][cEmail]);
       if (!k) continue;
-      if (!map[k]) map[k] = { nombre: d[i][cNombre], generadas: 0, compensadas: 0 };
-      if (signo > 0) map[k].generadas   += parseFloat(d[i][cHoras]) || 0;
-      else           map[k].compensadas += parseFloat(d[i][cHoras]) || 0;
+      if (!map[k]) map[k] = { nombre: dSol[i][cNombre], generadas: 0, compensadas: 0, liqSabDom: 0, liqFeriado: 0 };
+      const horas = parseFloat(dSol[i][cHoras]) || 0;
+      const c = circuitoHE(dSol[i][cFecha]);
+      if (c.circuito === 'LIQ') {
+        if (c.tipo === 'Feriado') map[k].liqFeriado += horas;
+        else map[k].liqSabDom += horas;
+      } else {
+        map[k].generadas += horas;
+      }
     }
-  };
-  rec(SH.SOL, 1);
-  rec(SH.COMP, -1);
+  }
+
+  const dComp = ss.getSheetByName(SH.COMP).getDataRange().getValues();
+  if (dComp.length >= 2) {
+    const enc = dComp[0];
+    const cEmail  = _idx(enc, 'Email');
+    const cNombre = _idx(enc, 'Supervisor');
+    const cEstado = _idx(enc, 'Estado');
+    const cHoras  = _idx(enc, 'Horas a compensar');
+    for (let i = 1; i < dComp.length; i++) {
+      if (dComp[i][cEstado] !== 'Aprobada') continue;
+      const k = _normEmail(dComp[i][cEmail]);
+      if (!k) continue;
+      if (!map[k]) map[k] = { nombre: dComp[i][cNombre], generadas: 0, compensadas: 0, liqSabDom: 0, liqFeriado: 0 };
+      map[k].compensadas += parseFloat(dComp[i][cHoras]) || 0;
+    }
+  }
+
   return map;
 }
 
 // ==================== RESUMEN MENSUAL ====================
+/**
+ * Manda DOS tablas, con dos criterios de fecha distintos a proposito:
+ *  - "Resumen de Horas Extra" (la de siempre): por Timestamp (cuando se
+ *    CARGO la solicitud), agrupa TODA hora Aprobada sin distinguir
+ *    circuito. La columna "Saldo compensable" es el saldo compensable
+ *    ACTUAL de cada supervisor (no del mes: es un acumulado a la fecha).
+ *  - "Liquidacion del mes (por Fecha HE)" (nueva, FLC-DOC-RH-092): por
+ *    Fecha HE (cuando se TRABAJO la hora extra), solo horas LIQ
+ *    (sabado/domingo/feriado con vigencia aplicada) del mes anterior. Se
+ *    paga por cuando se trabajo, no por cuando se tipeo la solicitud.
+ */
 function resumenMensual() {
   const hoy = new Date();
   const ini = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1);
   const fin = new Date(hoy.getFullYear(), hoy.getMonth(), 0, 23, 59, 59);
   const per = Utilities.formatDate(ini, CONFIG.TZ, 'MM/yyyy');
+  const anioIni = ini.getFullYear(), mesIni = ini.getMonth() + 1; // mes anterior, 1-12
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const d  = ss.getSheetByName(SH.SOL).getDataRange().getValues();
@@ -827,21 +1209,44 @@ function resumenMensual() {
   const cSupervisor = _idx(enc, 'Supervisor');
   const cHoras      = _idx(enc, 'Horas');
   const cEstado     = _idx(enc, 'Estado');
+  const cFecha      = _idx(enc, 'Fecha HE');
 
   const det = {};
   let total = 0, pend = 0;
 
+  // Tabla nueva: acumula por supervisor segun "Fecha HE" (no Timestamp).
+  const liq = {};
+  let liqTotalSabDom = 0, liqTotalFeriado = 0;
+
   for (let i = 1; i < d.length; i++) {
     const ts = new Date(d[i][cTimestamp]);
+    const estado = d[i][cEstado];
+    const nombre = d[i][cSupervisor];
+    const horas = parseFloat(d[i][cHoras]) || 0;
+
+    if (estado === 'Aprobada') {
+      // Tabla nueva: filtra por Fecha HE en el mes anterior, sin importar
+      // cuando se cargo la solicitud.
+      const partesHE = _partesFecha(d[i][cFecha]);
+      if (partesHE && partesHE.anio === anioIni && partesHE.mes === mesIni) {
+        const c = circuitoHE(d[i][cFecha]);
+        if (c.circuito === 'LIQ') {
+          if (!liq[nombre]) liq[nombre] = { sabDom: 0, feriado: 0 };
+          if (c.tipo === 'Feriado') { liq[nombre].feriado += horas; liqTotalFeriado += horas; }
+          else { liq[nombre].sabDom += horas; liqTotalSabDom += horas; }
+        }
+      }
+    }
+
+    // Tabla vieja: sigue filtrando por Timestamp, sin cambios de criterio.
     if (ts < ini || ts > fin) continue;
-    if (d[i][cEstado] === 'Pendiente') { pend++; continue; }
-    if (d[i][cEstado] !== 'Aprobada') continue;
-    const n = d[i][cSupervisor];
-    det[n] = (det[n] || 0) + (parseFloat(d[i][cHoras]) || 0);
-    total += parseFloat(d[i][cHoras]) || 0;
+    if (estado === 'Pendiente') { pend++; continue; }
+    if (estado !== 'Aprobada') continue;
+    det[nombre] = (det[nombre] || 0) + horas;
+    total += horas;
   }
 
-  // Un solo lookup: mapa nombre -> saldo acumulado, armado una vez.
+  // Un solo lookup: mapa nombre -> saldo compensable, armado una vez.
   const saldos = tablaSaldos();
   const saldoPorNombre = {};
   Object.keys(saldos).forEach(email => {
@@ -851,10 +1256,29 @@ function resumenMensual() {
 
   let filas = '';
   Object.keys(det).sort().forEach(n => {
-    const saldoAcumulado = saldoPorNombre.hasOwnProperty(n) ? _fmtHoras(saldoPorNombre[n]) : '-';
+    const saldoCompensable = saldoPorNombre.hasOwnProperty(n) ? _fmtHoras(saldoPorNombre[n]) : '-';
     filas += '<tr><td>' + n + '</td><td style="text-align:right">' + _fmtHoras(det[n]) +
-             '</td><td style="text-align:right">' + saldoAcumulado + '</td></tr>';
+             '</td><td style="text-align:right">' + saldoCompensable + '</td></tr>';
   });
+
+  let filasLiq = '';
+  Object.keys(liq).sort().forEach(n => {
+    const t = liq[n].sabDom + liq[n].feriado;
+    filasLiq += '<tr><td>' + n + '</td><td style="text-align:right">' + _fmtHoras(liq[n].sabDom) +
+                '</td><td style="text-align:right">' + _fmtHoras(liq[n].feriado) +
+                '</td><td style="text-align:right"><b>' + _fmtHoras(t) + '</b></td></tr>';
+  });
+  const liqTotalGeneral = liqTotalSabDom + liqTotalFeriado;
+  const tablaLiqHTML = !Object.keys(liq).length
+    ? '<p style="color:#666">Sin horas liquidables (sabado/domingo/feriado) con Fecha HE en ' + per + '.</p>'
+    : '<table style="border-collapse:collapse;width:100%;font-size:13px">' +
+      '<tr style="background:#7B2233;color:#fff"><th align="left">Supervisor</th>' +
+      '<th align="right">Sab/Dom</th><th align="right">Feriado</th><th align="right">Total</th></tr>' +
+      filasLiq +
+      '<tr style="font-weight:bold;background:#F2EDE4"><td>TOTAL</td>' +
+      '<td align="right">' + _fmtHoras(liqTotalSabDom) + '</td>' +
+      '<td align="right">' + _fmtHoras(liqTotalFeriado) + '</td>' +
+      '<td align="right">' + _fmtHoras(liqTotalGeneral) + '</td></tr></table>';
 
   const html =
     '<div style="font-family:Arial,sans-serif;max-width:640px">' +
@@ -862,11 +1286,17 @@ function resumenMensual() {
     '<p style="color:#666;margin-top:0">' + CONFIG.NOMBRE_PLANTA + '</p>' +
     '<table style="border-collapse:collapse;width:100%;font-size:13px">' +
     '<tr style="background:#7B2233;color:#fff"><th align="left">Supervisor</th>' +
-    '<th align="right">HE del mes</th><th align="right">Saldo acumulado</th></tr>' +
+    '<th align="right">HE del mes</th><th align="right">Saldo compensable</th></tr>' +
     filas +
     '<tr style="font-weight:bold;background:#F2EDE4"><td>TOTAL</td>' +
     '<td align="right">' + _fmtHoras(total) + '</td><td></td></tr></table>' +
     (pend ? '<p style="color:#B00020">Solicitudes pendientes de aprobacion: ' + pend + '</p>' : '') +
+    '<h2 style="color:#7B2233;margin:24px 0 4px;font-size:16px">Liquidacion del mes (por Fecha HE)</h2>' +
+    '<p style="color:#666;margin-top:0;font-size:12px">Horas de sabado, domingo o feriado ' +
+    'TRABAJADAS en ' + per + ' (segun "Fecha HE", no segun cuando se cargo la solicitud).</p>' +
+    tablaLiqHTML +
+    '<p style="font-size:11px;color:#999;margin-top:10px">Liquidable segun hoja Feriados al momento ' +
+    'de este resumen. Politica FLC-DOC-RH-092, vigencia ' + CONFIG.VIGENCIA_LIQUIDACION + '.</p>' +
     '</div>';
 
   const opciones = { to: jefeEmail(), subject: 'Resumen mensual de Horas Extra - ' + per, htmlBody: html };
@@ -979,15 +1409,18 @@ function _equipoCompleto() {
   return _directorio()
     .filter(function (p) { return p.rol === 'Supervisor'; })
     .map(function (p) {
-      const generadas = _sumaAprobadas(SH.SOL, p.email);
+      const d = _desgloseHE(p.email);
       const compensadas = _sumaAprobadas(SH.COMP, p.email);
       return {
         nombre: p.nombre,
         email: p.email,
-        generadas: generadas,
+        generadas: d.compensables,
         compensadas: compensadas,
-        saldo: generadas - compensadas,
-        heDelMes: _heDelMes(p.email)
+        saldo: d.compensables - compensadas,
+        heDelMes: _heDelMes(p.email),
+        liqSabDom: d.liqSabDom,
+        liqFeriado: d.liqFeriado,
+        liqTotal: d.liqTotal
       };
     })
     .sort(function (a, b) { return b.saldo - a.saldo; });
@@ -1025,7 +1458,7 @@ function apiEstado() {
   // permite), y si no le devolvieramos su saldo cargaria horas que despues
   // no ve por ningun lado. No hay riesgo de privacidad: son sus propios
   // datos, filtrados por el email de su sesion.
-  const generadas = _sumaAprobadas(SH.SOL, yo.email);
+  const d = _desgloseHE(yo.email);
   const compensadas = _sumaAprobadas(SH.COMP, yo.email);
 
   resultado.misSolicitudes = _filasDe(SH.SOL, yo.email).map(function (f) {
@@ -1042,7 +1475,15 @@ function apiEstado() {
     };
   }).sort(function (a, b) { return a.id < b.id ? 1 : -1; });
 
-  resultado.saldo = { generadas: generadas, compensadas: compensadas, disponible: generadas - compensadas };
+  // NO renombrar generadas/compensadas/disponible: el cliente los usa por
+  // nombre en varios lugares. "generadas" ahora es solo COMPENSABLE (ver
+  // _desgloseHE/circuitoHE); liqSabDom/liqFeriado/liqTotal son campos
+  // nuevos, aditivos.
+  resultado.saldo = {
+    generadas: d.compensables, compensadas: compensadas, disponible: d.compensables - compensadas,
+    liqSabDom: d.liqSabDom, liqFeriado: d.liqFeriado, liqTotal: d.liqTotal
+  };
+  resultado.politica = { vigencia: CONFIG.VIGENCIA_LIQUIDACION };
 
   // El bloque personal se muestra siempre a los Supervisores (aunque este
   // en cero: es su pantalla principal) y, para los demas roles, solo si
@@ -1064,7 +1505,8 @@ function apiEstado() {
     resultado.totales = {
       heDelMes: equipo.reduce(function (acc, p) { return acc + p.heDelMes; }, 0),
       pendientes: pendientesCompletos.length,
-      saldoTotal: equipo.reduce(function (acc, p) { return acc + p.saldo; }, 0)
+      saldoTotal: equipo.reduce(function (acc, p) { return acc + p.saldo; }, 0),
+      liqTotal: equipo.reduce(function (acc, p) { return acc + p.liqTotal; }, 0)
     };
   }
 
@@ -1320,7 +1762,7 @@ function apiCalendario(anio, mes) {
   const d = ss.getSheetByName(SH.SOL).getDataRange().getValues();
 
   const dias = {};
-  let totalAprobadas = 0, totalPendientes = 0;
+  let totalAprobadas = 0, totalPendientes = 0, totalAprobadasLiq = 0, totalAprobadasComp = 0;
   const porSupervisorMapa = {};
 
   if (d.length >= 2) {
@@ -1337,10 +1779,15 @@ function apiCalendario(anio, mes) {
       const estado = d[i][cEstado];
       const horas = parseFloat(d[i][cHoras]) || 0;
       const supervisor = d[i][cSup];
+      const c = circuitoHE(d[i][cFecha]);
 
       if (!dias[partes.dia]) {
         dias[partes.dia] = {
-          dia: partes.dia, horasAprobadas: 0, horasPendientes: 0, detalle: []
+          dia: partes.dia, horasAprobadas: 0, horasPendientes: 0, detalle: [],
+          // Propiedad del DIA, no de una solicitud puntual: todas las filas
+          // de este mismo dia comparten fecha, asi que tipoDia/feriadoNombre/
+          // liquidable son iguales para cualquiera de ellas.
+          tipoDia: c.tipo, feriadoNombre: c.feriadoNombre, liquidable: (c.circuito === 'LIQ')
         };
       }
       const acc = dias[partes.dia];
@@ -1353,12 +1800,14 @@ function apiCalendario(anio, mes) {
       if (estado === 'Aprobada') {
         acc.horasAprobadas += horas;
         totalAprobadas += horas;
-        if (!porSupervisorMapa[supervisor]) porSupervisorMapa[supervisor] = { horasAprobadas: 0, horasPendientes: 0 };
+        if (c.circuito === 'LIQ') totalAprobadasLiq += horas; else totalAprobadasComp += horas;
+        if (!porSupervisorMapa[supervisor]) porSupervisorMapa[supervisor] = { horasAprobadas: 0, horasPendientes: 0, horasLiq: 0 };
         porSupervisorMapa[supervisor].horasAprobadas += horas;
+        if (c.circuito === 'LIQ') porSupervisorMapa[supervisor].horasLiq += horas;
       } else if (estado === 'Pendiente') {
         acc.horasPendientes += horas;
         totalPendientes += horas;
-        if (!porSupervisorMapa[supervisor]) porSupervisorMapa[supervisor] = { horasAprobadas: 0, horasPendientes: 0 };
+        if (!porSupervisorMapa[supervisor]) porSupervisorMapa[supervisor] = { horasAprobadas: 0, horasPendientes: 0, horasLiq: 0 };
         porSupervisorMapa[supervisor].horasPendientes += horas;
       }
       // Rechazada: ya quedo en el detalle de arriba; no suma a ningun total, a proposito.
@@ -1369,7 +1818,8 @@ function apiCalendario(anio, mes) {
     const acc = dias[k];
     return {
       dia: acc.dia, horasAprobadas: acc.horasAprobadas,
-      horasPendientes: acc.horasPendientes, detalle: acc.detalle
+      horasPendientes: acc.horasPendientes, detalle: acc.detalle,
+      tipoDia: acc.tipoDia, feriadoNombre: acc.feriadoNombre, liquidable: acc.liquidable
     };
   }).sort(function (a, b) { return a.dia - b.dia; });
 
@@ -1377,14 +1827,31 @@ function apiCalendario(anio, mes) {
     return {
       nombre: nombre,
       horasAprobadas: porSupervisorMapa[nombre].horasAprobadas,
-      horasPendientes: porSupervisorMapa[nombre].horasPendientes
+      horasPendientes: porSupervisorMapa[nombre].horasPendientes,
+      horasLiq: porSupervisorMapa[nombre].horasLiq
     };
   }).sort(function (a, b) { return b.horasAprobadas - a.horasAprobadas; });
+
+  // Feriados del mes segun la hoja "Feriados", con o sin solicitudes
+  // cargadas ese dia: el cliente los usa para marcar la celda con el badge
+  // "F" aunque nadie haya pedido horas extra ese dia.
+  const feriadosMes = [];
+  const mapaFeriados = _feriadosMap();
+  Object.keys(mapaFeriados).forEach(function (clave) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(clave);
+    if (!m) return;
+    if (Number(m[1]) === anioNum && Number(m[2]) === mesNum) {
+      feriadosMes.push({ dia: Number(m[3]), nombre: mapaFeriados[clave] });
+    }
+  });
+  feriadosMes.sort(function (a, b) { return a.dia - b.dia; });
 
   return {
     anio: anioNum, mes: mesNum, dias: diasArray,
     totalAprobadas: totalAprobadas, totalPendientes: totalPendientes,
-    porSupervisor: porSupervisorArray
+    totalAprobadasLiq: totalAprobadasLiq, totalAprobadasComp: totalAprobadasComp,
+    porSupervisor: porSupervisorArray,
+    feriados: feriadosMes, vigencia: CONFIG.VIGENCIA_LIQUIDACION
   };
 }
 
@@ -1432,6 +1899,7 @@ function apiConsulta() {
     for (let i = 1; i < d.length; i++) {
       if (yo.rol === 'Supervisor' && _normEmail(d[i][cEmail]) !== yo.email) continue;
 
+      const c = circuitoHE(d[i][cFecha]);
       solicitudes.push({
         id: d[i][cId],
         supervisor: d[i][cSup],
@@ -1440,7 +1908,9 @@ function apiConsulta() {
         horas: parseFloat(d[i][cHoras]) || 0,
         linea: d[i][cLinea],
         motivo: d[i][cMotivo],
-        estado: d[i][cEstado]
+        estado: d[i][cEstado],
+        tipoDia: c.tipo,
+        circuito: c.circuito
       });
     }
   }

@@ -95,15 +95,36 @@
     <section id="viewSupervisor" class="view" aria-labelledby="tituloSupervisor" hidden>
       <h1 id="tituloSupervisor" class="visually-hidden">Tu saldo y tus solicitudes</h1>
 
+      <section class="card surface card-atencion aviso-politica" id="avisoPolitica" hidden>
+        <svg class="icon icon-20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+        <div>
+          <p><strong>Cambio de politica (FLC-DOC-RH-092).</strong> Desde el 01/08/2026 las horas de sabado, domingo y feriado <strong>se pagan</strong> y ya no suman a este saldo. Tenes <b class="num" id="avisoPoliticaHoras">0,0</b> hs en liquidacion. Tu saldo compensable refleja solo dias de semana.</p>
+          <button type="button" class="btn btn-ghost btn-sm" id="btnAvisoOk">Entendido</button>
+        </div>
+      </section>
+
       <section class="card kpi-card surface card-neutral">
-        <div class="kpi-label">Tu saldo disponible</div>
+        <div class="kpi-label">Saldo para compensar</div>
         <div class="kpi-value" id="saldoNumber">0,0 hs</div>
-        <div class="kpi-sub">Horas extra generadas menos compensadas</div>
+        <div class="kpi-sub">Solo dias de semana; sab/dom y feriados van a liquidacion</div>
         <div class="kpi-breakdown">
           <span><span class="dot dot-gen"></span>Generadas <b class="num" id="saldoGeneradas">0,0</b> hs</span>
           <span><span class="dot dot-comp"></span>Compensadas <b class="num" id="saldoCompensadas">0,0</b> hs</span>
         </div>
       </section>
+
+      <div class="kpi-grid kpi-grid-liq">
+        <section class="card kpi-card kpi-mini surface card-neutral">
+          <div class="kpi-label">Liquidable sab/dom</div>
+          <div class="kpi-value" id="liqSabDom">0,0 hs</div>
+          <div class="kpi-sub">Desde 01/08/2026 &middot; se paga</div>
+        </section>
+        <section class="card kpi-card kpi-mini surface card-neutral">
+          <div class="kpi-label">Liquidable feriado</div>
+          <div class="kpi-value" id="liqFeriado">0,0 hs</div>
+          <div class="kpi-sub">Desde 01/08/2026 &middot; se paga</div>
+        </section>
+      </div>
 
       <div class="actions-row">
         <button type="button" class="btn btn-primary" id="btnAbrirHE">
@@ -185,6 +206,15 @@
               <option value="Varias">Varias</option>
             </select>
           </label>
+          <label>Tipo de dia
+            <select id="conJefeTipoDia">
+              <option value="Todos">Todos</option>
+              <option value="liq">Solo liquidable</option>
+              <option value="sabdom">Solo sab-dom</option>
+              <option value="feriado">Solo feriados</option>
+              <option value="semana">Solo dias de semana</option>
+            </select>
+          </label>
         </div>
         <div class="con-limpiar-row">
           <button type="button" class="btn btn-ghost btn-sm" id="conJefeLimpiar">Limpiar filtros</button>
@@ -230,9 +260,14 @@
           <div class="kpi-sub">Esperando al Jefe</div>
         </section>
         <section class="card kpi-card kpi-mini surface card-ok">
-          <div class="kpi-label">Saldo acumulado (planta)</div>
+          <div class="kpi-label">Saldo compensable (planta)</div>
           <div class="kpi-value" id="personasSaldoTotal">0,0 hs</div>
           <div class="kpi-sub">Generadas menos compensadas</div>
+        </section>
+        <section class="card kpi-card kpi-mini surface card-neutral">
+          <div class="kpi-label">En liquidacion (planta)</div>
+          <div class="kpi-value" id="personasLiqTotal">0,0 hs</div>
+          <div class="kpi-sub">Sab/dom + feriados desde 01/08/2026</div>
         </section>
       </div>
 
@@ -244,8 +279,10 @@
               <tr>
                 <th>Supervisor</th>
                 <th class="num-col">HE del mes</th>
+                <th class="num-col">Liq. sab/dom</th>
+                <th class="num-col">Liq. feriado</th>
                 <th class="num-col">Compensadas</th>
-                <th class="num-col">Saldo acumulado</th>
+                <th class="num-col">Saldo compensable</th>
               </tr>
             </thead>
             <tbody id="personasTablaBody"><!-- filas via JS --></tbody>
@@ -280,6 +317,15 @@
               <option value="L2">L2</option>
               <option value="L3">L3</option>
               <option value="Varias">Varias</option>
+            </select>
+          </label>
+          <label>Tipo de dia
+            <select id="conPersonasTipoDia">
+              <option value="Todos">Todos</option>
+              <option value="liq">Solo liquidable</option>
+              <option value="sabdom">Solo sab-dom</option>
+              <option value="feriado">Solo feriados</option>
+              <option value="semana">Solo dias de semana</option>
             </select>
           </label>
         </div>
@@ -384,7 +430,7 @@
 
         <div class="calc-box" id="compCalcBox">
           <div class="calc-row"><span>Horas a descontar</span><b class="num" id="compHorasDescontar">8,0 hs</b></div>
-          <div class="calc-row"><span>Saldo actual</span><b class="num" id="compSaldoActual">0,0 hs</b></div>
+          <div class="calc-row"><span>Saldo compensable</span><b class="num" id="compSaldoActual">0,0 hs</b></div>
           <div class="calc-row calc-result"><span>Saldo resultante</span><b class="num" id="compSaldoResultante">0,0 hs</b></div>
         </div>
 
@@ -410,6 +456,7 @@
         </button>
       </div>
       <div class="modal-body">
+        <div id="calDiaTipo"></div>
         <div class="tabla-wrap">
           <table class="tabla tabla-caldia">
             <thead>

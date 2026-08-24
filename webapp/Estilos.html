@@ -359,6 +359,32 @@
   .kpi-mini { text-align: left; }
   .kpi-mini .kpi-value { font-size: 26px; margin: 4px 0 2px; }
 
+  /* Grilla 2 columnas para los KPI mini de liquidacion (vista Supervisor). */
+  .kpi-grid-liq { grid-template-columns: 1fr 1fr; }
+
+  /* Tarjeta de aviso descartable (cambio de politica FLC-DOC-RH-092). */
+  .aviso-politica { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 12px; }
+  .aviso-politica .icon { color: var(--amber-text); flex-shrink: 0; margin-top: 2px; }
+  .aviso-politica p { font-size: 12.5px; line-height: 1.5; color: var(--text); }
+  .aviso-politica .btn { margin-top: 8px; }
+
+  /* Chip "liquidable": NEUTRA a proposito. No entra al semaforo
+     amber/olive/crimson (pendiente/aprobada/rechazada): es una propiedad del
+     dia, no un estado. Icono + texto + borde => nunca solo color. */
+  .chip-liq { background: var(--card2); border: 1px solid var(--border); color: var(--text); }
+
+  /* Feriado: badge "F" textual. El significado lo dan la letra y el
+     aria-label, no un color. */
+  .cal-day-fer {
+    position: absolute; top: 2px; right: 3px;
+    font-size: 8px; font-weight: 800; line-height: 1;
+    padding: 1px 3px; border-radius: 4px;
+    background: var(--card2); border: 1px solid var(--border); color: var(--text);
+  }
+  .cal-leyenda { margin-top: 8px; font-size: 10.5px; color: var(--muted); }
+  .equipo-liq { font-size: 11px; color: var(--muted); grid-column: 1 / 2; padding-left: 34px; }
+  .equipo-liq b { color: var(--text); }
+
   /* ==================== BOTONES ==================== */
   .btn {
     border-radius: var(--radius-btn);

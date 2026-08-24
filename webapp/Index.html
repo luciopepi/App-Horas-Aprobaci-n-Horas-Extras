@@ -98,7 +98,7 @@
       <section class="card surface card-atencion aviso-politica" id="avisoPolitica" hidden>
         <svg class="icon icon-20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
         <div>
-          <p><strong>Cambio de politica (FLC-DOC-RH-092).</strong> Desde el 01/08/2026 las horas de sabado, domingo y feriado <strong>se pagan</strong> y ya no suman a este saldo. Tenes <b class="num" id="avisoPoliticaHoras">0,0</b> hs en liquidacion. Tu saldo compensable refleja solo dias de semana.</p>
+          <p><strong>Cambio de politica (FLC-DOC-RH-092).</strong> Desde el <span class="vig-fecha">01/08/2026</span> las horas de sabado, domingo y feriado <strong>se pagan</strong> y ya no suman a este saldo. Tenes <b class="num" id="avisoPoliticaHoras">0,0</b> hs en liquidacion. Tu saldo compensable refleja solo dias de semana.</p>
           <button type="button" class="btn btn-ghost btn-sm" id="btnAvisoOk">Entendido</button>
         </div>
       </section>
@@ -117,12 +117,12 @@
         <section class="card kpi-card kpi-mini surface card-neutral">
           <div class="kpi-label">Liquidable sab/dom</div>
           <div class="kpi-value" id="liqSabDom">0,0 hs</div>
-          <div class="kpi-sub">Desde 01/08/2026 &middot; se paga</div>
+          <div class="kpi-sub">Desde <span class="vig-fecha">01/08/2026</span> &middot; se paga</div>
         </section>
         <section class="card kpi-card kpi-mini surface card-neutral">
           <div class="kpi-label">Liquidable feriado</div>
           <div class="kpi-value" id="liqFeriado">0,0 hs</div>
-          <div class="kpi-sub">Desde 01/08/2026 &middot; se paga</div>
+          <div class="kpi-sub">Desde <span class="vig-fecha">01/08/2026</span> &middot; se paga</div>
         </section>
       </div>
 
@@ -248,7 +248,7 @@
       <div class="eyebrow" style="margin-bottom:4px">Gerencia de Personas</div>
       <div class="h2" style="margin-bottom:14px">Saldos de horas extra — Fraccionamiento</div>
 
-      <div class="kpi-grid">
+      <div class="kpi-grid kpi-grid-4">
         <section class="card kpi-card kpi-mini surface card-neutral">
           <div class="kpi-label">HE del mes (planta)</div>
           <div class="kpi-value" id="personasTotalMes">0,0 hs</div>
@@ -267,12 +267,13 @@
         <section class="card kpi-card kpi-mini surface card-neutral">
           <div class="kpi-label">En liquidacion (planta)</div>
           <div class="kpi-value" id="personasLiqTotal">0,0 hs</div>
-          <div class="kpi-sub">Sab/dom + feriados desde 01/08/2026</div>
+          <div class="kpi-sub">Sab/dom + feriados desde <span class="vig-fecha">01/08/2026</span></div>
         </section>
       </div>
 
       <section class="card surface">
         <div class="section-title"><h2 class="h3">Supervisores</h2></div>
+        <p class="tabla-scroll-hint">Deslizá la tabla para ver el saldo compensable &rarr;</p>
         <div class="tabla-wrap">
           <table class="tabla">
             <thead>

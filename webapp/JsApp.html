@@ -41,10 +41,15 @@
   // Escapa texto antes de insertarlo con innerHTML. El "Motivo" lo escribe
   // el supervisor y se termina mostrando en la pantalla del Jefe, asi que
   // nunca hay que volcarlo crudo en el HTML.
+  // textContent -> innerHTML escapa &, < y >, pero NO las comillas: alcanza
+  // para contenido, no para atributos. Como el nombre del feriado lo escribe
+  // una persona a mano en la hoja y termina dentro de title="..." y
+  // aria-label="...", una comilla (Dia del "Trabajador") cerraria el atributo
+  // y romperia la celda. Por eso se escapan tambien las dos comillas.
   var _escDiv = document.createElement('div');
   function esc(valor) {
     _escDiv.textContent = valor == null ? '' : String(valor);
-    return _escDiv.innerHTML;
+    return _escDiv.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
   /* ==================== LLAMADAS AL SERVIDOR ==================== */
@@ -164,11 +169,27 @@
   /* ==================== ESTADO GLOBAL EN MEMORIA (lo ultimo que mando el servidor) ==================== */
   var estadoActual = null;
 
+  // La fecha de vigencia esta escrita en el HTML como valor de arranque, pero
+  // la que manda es la del servidor (CONFIG.VIGENCIA_LIQUIDACION). Si RRHH
+  // corre la fecha y solo se cambia la constante, sin esto la app le seguiria
+  // afirmando al supervisor que sus sabados se pagan desde una fecha que ya
+  // no rige: una afirmacion sobre su sueldo que seria falsa.
+  function pintarVigencia(data) {
+    var v = data && data.politica && data.politica.vigencia;
+    if (!v) return;
+    var partes = String(v).split('-');
+    if (partes.length !== 3) return;
+    var texto = partes[2] + '/' + partes[1] + '/' + partes[0];
+    var nodos = document.querySelectorAll('.vig-fecha');
+    for (var i = 0; i < nodos.length; i++) nodos[i].textContent = texto;
+  }
+
   async function cargarEstado() {
     mostrarCargando();
     try {
       var data = await llamarServidor('apiEstado');
       estadoActual = data;
+      pintarVigencia(data);
       mostrarVista(data.yo.rol);
       if (data.yo.rol === 'Supervisor') { renderSupervisor(data); calSupervisor.recargarActual(); }
       if (data.yo.rol === 'Jefe') { renderJefe(data); calJefe.recargarActual(); if (conJefe) conJefe.recargar(); }

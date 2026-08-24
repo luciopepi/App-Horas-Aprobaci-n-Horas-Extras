@@ -251,12 +251,58 @@ function setup() {
   // esta vacia), asi que volver a correr setup() en un Sheet en produccion
   // no toca las hojas existentes: solo crea "Feriados" si todavia no existe.
   _ensureHojaFeriados(ss);
+
+  const avisoTZ = _chequearTZ();
   SpreadsheetApp.getUi().alert(
+    (avisoTZ ? avisoTZ + '\n\n' : '') +
     'Hojas creadas. Completar la hoja "Correos" con los correos reales ' +
     '(al menos un Jefe activo), cargar los feriados en la hoja "Feriados" ' +
     '(Fecha + Nombre; ver politica FLC-DOC-RH-092) y revisar ' +
     'CONFIG.WEBAPP_URL tras implementar la WebApp.'
   );
+}
+
+/**
+ * Compara la zona horaria de la PLANILLA con la del script.
+ *
+ * Por que importa: una celda de fecha vuelve de getValues() como un Date
+ * construido en la zona de la PLANILLA, y _partesFecha lo lee con
+ * getFullYear/getMonth/getDate, que son hora local del SCRIPT. Si las dos
+ * zonas no coinciden, el trio (anio,mes,dia) se corre un dia entero.
+ *
+ * Con la politica FLC-DOC-RH-092 eso ya no es un detalle cosmetico: un
+ * sabado leido como viernes deja de liquidarse Y se muda al saldo de
+ * compensacion. Dos errores a la vez, iguales en todas las vistas, asi que
+ * nada se ve inconsistente y nadie lo nota.
+ *
+ * El calculo del dia de semana usa aritmetica UTC y es correcto; lo que esta
+ * guarda cubre es el paso previo, de donde sale el trio.
+ *
+ * @returns {string} mensaje de alerta, o '' si las zonas coinciden.
+ */
+function _chequearTZ() {
+  try {
+    const tzHoja = SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone();
+    if (tzHoja === CONFIG.TZ) return '';
+    return 'ATENCION - ZONA HORARIA DISTINTA\n' +
+      'La planilla esta en "' + tzHoja + '" y el script en "' + CONFIG.TZ + '".\n' +
+      'Con zonas distintas, una fecha puede leerse corrida un dia, y un sabado ' +
+      'leido como viernes deja de liquidarse. Corregir en Archivo > ' +
+      'Configuracion de la hoja de calculo > Zona horaria antes de usar el sistema.';
+  } catch (err) {
+    return '';   // sin acceso a la planilla no bloqueamos setup()
+  }
+}
+
+/**
+ * Diagnostico para correr a mano desde el editor cuando algo de fechas no
+ * cierra. Deja el resultado en el log de ejecuciones.
+ */
+function verificarZonaHoraria() {
+  const aviso = _chequearTZ();
+  const msg = aviso || ('Zona horaria correcta: planilla y script en "' + CONFIG.TZ + '".');
+  console.log(msg);
+  return msg;
 }
 
 function _ensureSheet(ss, name, headers) {
@@ -447,10 +493,15 @@ function _feriadosMap() {
     }
   }
 
+  // Los mapas vacios no se cachean a proposito (ver abajo), asi que el memo
+  // por ejecucion es lo UNICO que corta el ciclo en estos dos caminos. Sin
+  // el, circuitoHE() vuelve a leer la hoja una vez POR FILA: justo el dia
+  // del despliegue, con "Feriados" recien creada y todavia vacia, un
+  // apiEstado del Jefe se convierte en cientos de lecturas al Spreadsheet.
   const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SH.FER);
-  if (!sh) return {};
+  if (!sh) { _feriadosMemo = {}; return _feriadosMemo; }
   const data = sh.getDataRange().getValues();
-  if (data.length < 2) return {};
+  if (data.length < 2) { _feriadosMemo = {}; return _feriadosMemo; }
 
   const mapa = {};
   try {
@@ -468,7 +519,8 @@ function _feriadosMap() {
     // Encabezado de "Feriados" roto (columna renombrada/borrada): degrada a
     // {} y deja traza, en vez de tumbar apiEstado para todo el mundo.
     console.error('_feriadosMap: encabezados de "Feriados" invalidos: ' + err.message);
-    return {};
+    _feriadosMemo = {};
+    return _feriadosMemo;
   }
 
   if (cache && Object.keys(mapa).length > 0) {
@@ -488,6 +540,17 @@ function _pad2(n) {
 }
 
 /**
+ * Escapa texto para meterlo en el HTML de un mail. Los mails se arman
+ * concatenando strings, y varios de los valores que entran los tipea una
+ * persona (motivo, linea, nombre del feriado).
+ */
+function _escHtml(v) {
+  return String(v == null ? '' : v)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+/**
  * Correr manualmente despues de editar la hoja "Feriados" (alta, baja o
  * correccion de una fecha) para que el cambio se refleje de inmediato en
  * clasificarDia()/circuitoHE() y en todo lo que dependa de ellos (saldos,
@@ -497,13 +560,53 @@ function _pad2(n) {
  * cargada, sin tocarla.
  */
 function invalidarCacheFeriados() {
+  // Foto de los feriados ANTES de recargar, para poder decir que cambio.
+  let antes = {};
+  try { antes = _feriadosMap(); } catch (err) { antes = {}; }
+
   _feriadosMemo = null;
   const cache = _cacheSeguro();
-  if (!cache) return;
+  if (cache) {
+    try {
+      cache.remove(CACHE_KEY_FERIADOS);
+    } catch (err) {
+      // sin cache no hay nada que borrar
+    }
+  }
+
+  let despues = {};
+  try { despues = _feriadosMap(); } catch (err) { despues = {}; }
+  _auditarCambioFeriados(antes, despues);
+}
+
+/**
+ * Deja en "Auditoria" que feriados se agregaron o se sacaron.
+ *
+ * Por que hace falta: el tipo de dia se calcula al vuelo y no se guarda en
+ * "Solicitudes". Eso hace que corregir un feriado olvidado reclasifique solo
+ * las horas de ese dia, que es lo que se busca. Pero funciona igual en la
+ * direccion incomoda: agregar un feriado mueve horas ya aprobadas del saldo
+ * de compensacion a liquidacion, y el saldo de alguien baja sin que haya
+ * ocurrido ningun evento. Sin esta traza no habria forma de reconstruir
+ * despues por que cambio.
+ */
+function _auditarCambioFeriados(antes, despues) {
   try {
-    cache.remove(CACHE_KEY_FERIADOS);
+    const agregados = Object.keys(despues).filter(k => !(k in antes)).sort();
+    const quitados  = Object.keys(antes).filter(k => !(k in despues)).sort();
+    if (!agregados.length && !quitados.length) return;
+
+    let quien = '';
+    try { quien = Session.getActiveUser().getEmail() || ''; } catch (err) { quien = ''; }
+
+    const partes = [];
+    if (agregados.length) partes.push('agregados: ' + agregados.join(', '));
+    if (quitados.length)  partes.push('quitados: ' + quitados.join(', '));
+    _log('-', 'FERIADOS_CAMBIO', quien, partes.join(' | ') +
+         ' (reclasifica horas ya aprobadas de esos dias)');
   } catch (err) {
-    // sin cache no hay nada que borrar
+    // la auditoria nunca debe impedir que se refresquen los feriados
+    console.error('_auditarCambioFeriados: ' + err.message);
   }
 }
 
@@ -1020,7 +1123,9 @@ function _notificarResultado(fila, estado, esComp, enc) {
     // descanso a cuenta de saldo: son cosas distintas y el supervisor
     // tiene que poder distinguirlas).
     const c = circuitoHE(fila[cFecha]);
-    const tipoTexto = _tipoDiaTextoLower(c.tipo) + (c.tipo === 'Feriado' && c.feriadoNombre ? ' (' + c.feriadoNombre + ')' : '');
+    // El nombre del feriado lo tipea una persona en la hoja: escapar antes
+    // de concatenarlo al HTML del mail.
+    const tipoTexto = _escHtml(_tipoDiaTextoLower(c.tipo) + (c.tipo === 'Feriado' && c.feriadoNombre ? ' (' + c.feriadoNombre + ')' : ''));
     if (c.circuito === 'LIQ') {
       cuerpoExtra = '<p>Esta solicitud corresponde a <b>' + tipoTexto + '</b>: entra en ' +
         '<b>liquidacion</b> (se paga). No suma al saldo de compensacion.</p>';
@@ -1033,8 +1138,11 @@ function _notificarResultado(fila, estado, esComp, enc) {
         'vigencia del ' + CONFIG.VIGENCIA_LIQUIDACION.split('-').reverse().join('/') +
         ': suma al saldo de compensacion (no es retroactiva).</p>';
     }
+    // Una sola pasada por Solicitudes: saldoSupervisor() volveria a llamar a
+    // _desgloseHE por dentro, y esto corre dentro del lock de la aprobacion.
     const d = _desgloseHE(email);
-    lineaSaldo = 'Saldo compensable: <b>' + _fmtHoras(saldoSupervisor(email)) + ' hs</b> &middot; ' +
+    const saldoComp = d.compensables - _sumaAprobadas(SH.COMP, email);
+    lineaSaldo = 'Saldo compensable: <b>' + _fmtHoras(saldoComp) + ' hs</b> &middot; ' +
       'En liquidacion desde el ' + CONFIG.VIGENCIA_LIQUIDACION.split('-').reverse().join('/') +
       ': <b>' + _fmtHoras(d.liqTotal) + ' hs</b>.';
   }
@@ -1933,8 +2041,11 @@ function _mailAprobacion(o) {
   const url = a => CONFIG.WEBAPP_URL + '?id=' + o.id + '&token=' + o.token + '&accion=' + a;
   let filas = '';
   o.filas.forEach(f => {
-    filas += '<tr><td style="padding:6px 12px 6px 0;color:#666">' + f[0] +
-             '</td><td style="padding:6px 0"><b>' + f[1] + '</b></td></tr>';
+    // Los valores los escriben personas (motivo, linea, nombre del feriado):
+    // sin escapar, un "<" rompe el render del mail y una etiqueta completa
+    // inyecta HTML en la casilla del Jefe.
+    filas += '<tr><td style="padding:6px 12px 6px 0;color:#666">' + _escHtml(f[0]) +
+             '</td><td style="padding:6px 0"><b>' + _escHtml(f[1]) + '</b></td></tr>';
   });
   return '<div style="font-family:Arial,sans-serif;max-width:520px">' +
     '<h2 style="color:#7B2233;margin-bottom:2px">' + o.titulo + '</h2>' +

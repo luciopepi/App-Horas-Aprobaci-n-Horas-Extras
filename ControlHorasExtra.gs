@@ -1317,6 +1317,14 @@ function resumenMensual() {
  * Jefe, sin copia a Personas. Sirve para ver el mail antes del dia 1.
  */
 function probarResumenMensual() {
+  // Es global y la WebApp corre como quien la implementa: sin esta guarda,
+  // cualquier cuenta del dominio podria dispararla desde la consola del
+  // navegador. No se pone en resumenMensual() porque el activador por tiempo
+  // puede correr sin usuario activo.
+  const quien = _normEmail(Session.getActiveUser().getEmail() || '');
+  if (!quien || quien !== _normEmail(jefeEmail())) {
+    throw new Error('Solo el Jefe puede correr probarResumenMensual().');
+  }
   _enviarResumenMensual({ soloJefe: true, mesEnCurso: true });
 }
 
@@ -1415,6 +1423,9 @@ function _enviarResumenMensual(op) {
   // fecha en el mes del resumen, agrupadas por supervisor. Se informan
   // aparte: no se suman ni se restan a las horas extra.
   const canjes = _leerCanjes();
+  // Un canje aprobado con fecha ilegible descuenta saldo pero no cae en ningun
+  // mes: sin este contador desapareceria del resumen en silencio.
+  const cjSinFecha = canjes.filter(function (c) { return c.estado === 'Aprobada' && !c.partes; }).length;
   const porSup = {};
   let cjTotalHoras = 0, cjTotalDias = 0, cjPendientes = 0;
   canjes.forEach(function (c) {
@@ -1469,6 +1480,8 @@ function _enviarResumenMensual(op) {
     tablaCanjesHTML +
     (cjPendientes ? '<p style="color:#B00020">Canjes pendientes de aprobacion con fecha en ' +
       _escHtml(per) + ': ' + cjPendientes + '</p>' : '') +
+    (cjSinFecha ? '<p style="color:#B00020">Canjes aprobados con fecha ilegible (no se pueden ubicar en ' +
+      'ningun mes, pero si descuentan saldo): ' + cjSinFecha + '</p>' : '') +
     '<p style="font-size:11px;color:#999;margin-top:10px">Liquidable segun hoja Feriados al momento ' +
     'de este resumen. Politica FLC-DOC-RH-092, vigencia ' + CONFIG.VIGENCIA_LIQUIDACION + '.</p>' +
     '<p style="font-size:11px;color:#999">Los canjes se informan aparte: no se suman ni se restan ' +
@@ -1581,7 +1594,7 @@ function _pendientesParaJefe() {
   // Mas nuevo primero. El ID trae la fecha-hora DESPUES del prefijo (HE-/CP-):
   // se compara sin el prefijo, si no todas las HE ('HE-' > 'CP-') saldrian
   // antes que todos los canjes.
-  lista.sort(function (a, b) { return a.id.slice(3) < b.id.slice(3) ? 1 : -1; });
+  lista.sort(function (a, b) { return String(a.id).slice(3) < String(b.id).slice(3) ? 1 : -1; });
   return lista;
 }
 
@@ -2213,7 +2226,10 @@ function _mapaNombres() {
 function _iniciales(nombre) {
   return String(nombre || '').trim().split(/\s+/).filter(Boolean)
     .map(function (w) { return w.charAt(0).toUpperCase(); })
-    .slice(0, 3).join('');
+    // Maximo 2 letras: la marca del dia mide ~39px utiles a 390px de ancho, y
+    // con dos personas de nombre largo ("ABC? DEF?") la segunda se recortaba
+    // y se perdia el "?" de pendiente. Con 2 letras "AB? CD?" entra.
+    .slice(0, 2).join('');
 }
 
 /**
@@ -2239,7 +2255,9 @@ function _leerCanjes() {
     const email = _normEmail(d[i][cEmail]);
     out.push({
       id: String(d[i][cId]),
-      supervisor: String(d[i][cSup] || '').trim() || nombres[email] || '',
+      // Sin nombre en la hoja ni en el directorio (alguien dado de baja): mejor
+      // un rotulo explicito que una fila vacia en el mail y el calendario.
+      supervisor: String(d[i][cSup] || '').trim() || nombres[email] || 'Sin nombre',
       email: email,
       partes: _partesFecha(d[i][cFecha]),
       fechaTexto: _fmtFecha(d[i][cFecha]),

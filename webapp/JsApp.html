@@ -242,7 +242,7 @@
     });
     // El ID trae la fecha-hora DESPUES del prefijo (HE-/CP-): se compara sin
     // el prefijo, si no todas las HE ('HE-' > 'CP-') van antes que los canjes.
-    lista.sort(function (a, b) { return a.id.slice(3) < b.id.slice(3) ? 1 : -1; }); // mas nuevo primero
+    lista.sort(function (a, b) { return String(a.id).slice(3) < String(b.id).slice(3) ? 1 : -1; }); // mas nuevo primero
     return lista;
   }
 
@@ -1317,7 +1317,7 @@
       var ordenada = lista.slice().sort(function (a, b) {
         var ka = claveFecha(a), kb = claveFecha(b);
         if (ka !== kb) return kb - ka;
-        return a.id.slice(3) < b.id.slice(3) ? 1 : -1;
+        return String(a.id).slice(3) < String(b.id).slice(3) ? 1 : -1;
       });
       elLista.innerHTML = ordenada.map(function (f, i) {
         var info = chipInfo(f.estado);

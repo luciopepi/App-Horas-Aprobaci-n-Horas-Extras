@@ -151,8 +151,8 @@ Expresiones de AppSheet listas para copiar y pegar:
 
 // ============================ CONFIG ============================
 const CONFIG = {
-  JEFE_EMAIL:    'lucio@ejemplo.com',           // <-- tu correo laboral
-  RRHH_EMAILS:   'estela@ejemplo.com,jonathan@ejemplo.com', // copia informativa
+  JEFE_EMAIL:    'jefe@ejemplo.invalid',           // <-- tu correo laboral
+  RRHH_EMAILS:   'personas1@ejemplo.invalid,personas2@ejemplo.invalid', // copia informativa
   WEBAPP_URL:    'https://script.google.com/macros/s/XXXX/exec', // <-- pegar tras implementar
   NOMBRE_PLANTA: 'Planta Graffigna - Fraccionamiento',
   HORAS_POR_DIA: 8,        // equivalencia para compensacion en dias

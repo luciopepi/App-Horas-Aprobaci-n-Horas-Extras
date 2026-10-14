@@ -94,6 +94,7 @@ Convenciones:
 8. Activadores:
    - `onFormSubmitHE` → *Desde hoja de cálculo / Al enviar formulario*.
    - `resumenMensual` → *Basado en tiempo / Mensual, día 1, 07:00*.
+   - Para probar el resumen sin esperar al día 1: ejecutar `probarResumenMensual()` desde el editor. Manda el resumen del **mes en curso** solo al Jefe (sin copia a Personas). El resumen real (`resumenMensual`) incluye la tabla «Canjes del mes (por Fecha solicitada)», informada aparte: los canjes no se suman ni se restan a las horas extra.
 
 ## Configuración (`CONFIG` en el `.gs`)
 
@@ -141,6 +142,9 @@ Todas las funciones expuestas abajo arrancan resolviendo `_identificar()`: el em
 | `apiCrearHoraExtra({fecha, horas, linea, motivo})` | Supervisor o Jefe | Fecha válida y no futura; horas numérico entre 0,5 y 24; línea en `L1`/`L2`/`L3`/`Varias`; motivo no vacío. El email y el nombre son siempre los de la sesión, nunca los que mande el payload. |
 | `apiCrearCompensacion({fecha, tipo})` | Supervisor o Jefe | Fecha válida; tipo `completo` o `medio`. Las **horas las calcula el servidor** a partir del tipo (nunca un número que mande el cliente, para que no se pueda manipular el saldo con un payload armado a mano). **Bloquea si el saldo no alcanza** — es el único lugar del sistema donde el bloqueo es correcto, porque acá es reversible. |
 | `apiResolver(id, accion, confirmar)` | Solo Jefe | `accion` en `aprobar`/`rechazar`; idempotencia (si la solicitud ya no está Pendiente, error claro); lock para evitar carreras; si es una compensación con saldo insuficiente, no aprueba ni rechaza sola — devuelve un estado intermedio (`requiereConfirmacion`) que la UI muestra como "aprobar en descubierto", y recién con `confirmar=true` se aprueba, quedando `APROBADA_SALDO_NEGATIVO` en `Auditoria`. |
+
+| `apiCalendario(anio, mes)` | Cualquier cuenta identificada | Alcance por rol en el servidor (Supervisor: solo lo suyo). `dias`, `porSupervisor`, `totales` y `feriados` son solo horas extra. Los **canjes** (compensaciones) viajan aparte y son aditivos: `canjes` (`{id, dia, supervisor, iniciales, horas, tipoCanje, estado}`, solo Aprobada y Pendiente, del mes pedido), `totalCanjeAprobadas`/`cantCanjeAprobados`/`totalCanjePendientes`/`cantCanjePendientes` y `proximosCanjes` (`{fechaClave, supervisor, estado}`: canjes Aprobados o Pendientes entre el lunes de esta semana y el domingo de la siguiente, calculado con la fecha de hoy del servidor, sin importar el mes pedido). Los canjes **no** se suman a las horas extra. |
+| `apiConsulta()` | Cualquier cuenta identificada | Alcance por rol en el servidor. Devuelve `solicitudes` (horas extra, como siempre) y `canjes` (`{id, supervisor, fecha:{anio,mes,dia}, fechaTexto, horas, tipoCanje, estado, comentario}`, de la hoja `Compensaciones`, sin email ni token). El cliente los muestra en bloques separados de las horas extra. |
 
 El flujo de aprobación por el botón del mail (`doGet` con `id`+`token`+`accion`) es independiente de `apiResolver` a propósito: es el que está en producción, tiene su propia validación de token y su propio manejo de "sin sesión" (cuando el Jefe abre el link sin estar logueado), y no se tocó su lógica interna al construir la WebApp.
 

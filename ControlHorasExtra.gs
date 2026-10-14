@@ -1302,13 +1302,36 @@ function tablaSaldos() {
  *    Fecha HE (cuando se TRABAJO la hora extra), solo horas LIQ
  *    (sabado/domingo/feriado con vigencia aplicada) del mes anterior. Se
  *    paga por cuando se trabajo, no por cuando se tipeo la solicitud.
+ * Ademas lleva la tabla "Canjes del mes (por Fecha solicitada)": los canjes
+ * (compensaciones aprobadas) se informan APARTE, no se suman ni se restan a
+ * las horas extra de las tablas de arriba.
  */
 function resumenMensual() {
+  // OJO: el activador por tiempo llama resumenMensual(e) con un objeto
+  // evento. No agregarle parametros: esta funcion los ignora a proposito.
+  _enviarResumenMensual({ soloJefe: false });
+}
+
+/**
+ * Prueba manual desde el editor: manda el resumen del MES EN CURSO solo al
+ * Jefe, sin copia a Personas. Sirve para ver el mail antes del dia 1.
+ */
+function probarResumenMensual() {
+  _enviarResumenMensual({ soloJefe: true, mesEnCurso: true });
+}
+
+/**
+ * Cuerpo de resumenMensual()/probarResumenMensual().
+ * @param {{soloJefe:boolean, mesEnCurso:boolean}} op
+ */
+function _enviarResumenMensual(op) {
+  op = op || {};
   const hoy = new Date();
-  const ini = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1);
-  const fin = new Date(hoy.getFullYear(), hoy.getMonth(), 0, 23, 59, 59);
+  const desfase = op.mesEnCurso ? 0 : -1;
+  const ini = new Date(hoy.getFullYear(), hoy.getMonth() + desfase, 1);
+  const fin = new Date(hoy.getFullYear(), hoy.getMonth() + desfase + 1, 0, 23, 59, 59);
   const per = Utilities.formatDate(ini, CONFIG.TZ, 'MM/yyyy');
-  const anioIni = ini.getFullYear(), mesIni = ini.getMonth() + 1; // mes anterior, 1-12
+  const anioIni = ini.getFullYear(), mesIni = ini.getMonth() + 1; // mes del resumen (anterior, o el en curso si op.mesEnCurso), 1-12
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const d  = ss.getSheetByName(SH.SOL).getDataRange().getValues();
@@ -1365,14 +1388,14 @@ function resumenMensual() {
   let filas = '';
   Object.keys(det).sort().forEach(n => {
     const saldoCompensable = saldoPorNombre.hasOwnProperty(n) ? _fmtHoras(saldoPorNombre[n]) : '-';
-    filas += '<tr><td>' + n + '</td><td style="text-align:right">' + _fmtHoras(det[n]) +
+    filas += '<tr><td>' + _escHtml(n) + '</td><td style="text-align:right">' + _fmtHoras(det[n]) +
              '</td><td style="text-align:right">' + saldoCompensable + '</td></tr>';
   });
 
   let filasLiq = '';
   Object.keys(liq).sort().forEach(n => {
     const t = liq[n].sabDom + liq[n].feriado;
-    filasLiq += '<tr><td>' + n + '</td><td style="text-align:right">' + _fmtHoras(liq[n].sabDom) +
+    filasLiq += '<tr><td>' + _escHtml(n) + '</td><td style="text-align:right">' + _fmtHoras(liq[n].sabDom) +
                 '</td><td style="text-align:right">' + _fmtHoras(liq[n].feriado) +
                 '</td><td style="text-align:right"><b>' + _fmtHoras(t) + '</b></td></tr>';
   });
@@ -1387,6 +1410,43 @@ function resumenMensual() {
       '<td align="right">' + _fmtHoras(liqTotalSabDom) + '</td>' +
       '<td align="right">' + _fmtHoras(liqTotalFeriado) + '</td>' +
       '<td align="right">' + _fmtHoras(liqTotalGeneral) + '</td></tr></table>';
+
+  // Canjes del mes (por Fecha solicitada): compensaciones Aprobadas con
+  // fecha en el mes del resumen, agrupadas por supervisor. Se informan
+  // aparte: no se suman ni se restan a las horas extra.
+  const canjes = _leerCanjes();
+  const porSup = {};
+  let cjTotalHoras = 0, cjTotalDias = 0, cjPendientes = 0;
+  canjes.forEach(function (c) {
+    if (!c.partes || c.partes.anio !== anioIni || c.partes.mes !== mesIni) return;
+    if (c.estado === 'Pendiente') { cjPendientes++; return; }
+    if (c.estado !== 'Aprobada') return;
+    if (!porSup[c.supervisor]) porSup[c.supervisor] = { horas: 0, fechas: {} };
+    porSup[c.supervisor].horas += c.horas;
+    porSup[c.supervisor].fechas[_numPartes(c.partes)] = c.partes;
+    cjTotalHoras += c.horas;
+  });
+  let filasCj = '';
+  Object.keys(porSup).sort().forEach(function (n) {
+    const claves = Object.keys(porSup[n].fechas).map(Number).sort(function (a, b) { return a - b; });
+    const textoFechas = claves.map(function (k) {
+      const p = porSup[n].fechas[k];
+      return _pad2(p.dia) + '/' + _pad2(p.mes);
+    }).join(', ');
+    cjTotalDias += claves.length;
+    filasCj += '<tr><td>' + _escHtml(n) + '</td><td style="text-align:right">' + claves.length +
+               '</td><td style="text-align:right">' + _fmtHoras(porSup[n].horas) +
+               '</td><td>' + _escHtml(textoFechas) + '</td></tr>';
+  });
+  const tablaCanjesHTML = !Object.keys(porSup).length
+    ? '<p style="color:#666">Sin canjes aprobados con fecha en ' + _escHtml(per) + '.</p>'
+    : '<table style="border-collapse:collapse;width:100%;font-size:13px">' +
+      '<tr style="background:#7B2233;color:#fff"><th align="left">Supervisor</th>' +
+      '<th align="right">Dias</th><th align="right">Horas</th><th align="left">Fechas</th></tr>' +
+      filasCj +
+      '<tr style="font-weight:bold;background:#F2EDE4"><td>TOTAL</td>' +
+      '<td align="right">' + cjTotalDias + '</td>' +
+      '<td align="right">' + _fmtHoras(cjTotalHoras) + '</td><td></td></tr></table>';
 
   const html =
     '<div style="font-family:Arial,sans-serif;max-width:640px">' +
@@ -1403,13 +1463,23 @@ function resumenMensual() {
     '<p style="color:#666;margin-top:0;font-size:12px">Horas de sabado, domingo o feriado ' +
     'TRABAJADAS en ' + per + ' (segun "Fecha HE", no segun cuando se cargo la solicitud).</p>' +
     tablaLiqHTML +
+    '<h2 style="color:#7B2233;margin:24px 0 4px;font-size:16px">Canjes del mes (por Fecha solicitada)</h2>' +
+    '<p style="color:#666;margin-top:0;font-size:12px">Compensaciones aprobadas con fecha de canje en ' +
+    _escHtml(per) + '.</p>' +
+    tablaCanjesHTML +
+    (cjPendientes ? '<p style="color:#B00020">Canjes pendientes de aprobacion con fecha en ' +
+      _escHtml(per) + ': ' + cjPendientes + '</p>' : '') +
     '<p style="font-size:11px;color:#999;margin-top:10px">Liquidable segun hoja Feriados al momento ' +
     'de este resumen. Politica FLC-DOC-RH-092, vigencia ' + CONFIG.VIGENCIA_LIQUIDACION + '.</p>' +
+    '<p style="font-size:11px;color:#999">Los canjes se informan aparte: no se suman ni se restan ' +
+    'a las horas extra de este resumen.</p>' +
     '</div>';
 
   const opciones = { to: jefeEmail(), subject: 'Resumen mensual de Horas Extra - ' + per, htmlBody: html };
-  const cc = personasEmails();
-  if (cc) opciones.cc = cc;
+  if (!op.soloJefe) {
+    const cc = personasEmails();
+    if (cc) opciones.cc = cc;
+  }
   MailApp.sendEmail(opciones);
 }
 
@@ -1508,7 +1578,10 @@ function _pendientesParaJefe() {
     }
   }
 
-  lista.sort(function (a, b) { return a.id < b.id ? 1 : -1; }); // mas nuevo primero (el ID trae fecha-hora)
+  // Mas nuevo primero. El ID trae la fecha-hora DESPUES del prefijo (HE-/CP-):
+  // se compara sin el prefijo, si no todas las HE ('HE-' > 'CP-') saldrian
+  // antes que todos los canjes.
+  lista.sort(function (a, b) { return a.id.slice(3) < b.id.slice(3) ? 1 : -1; });
   return lista;
 }
 
@@ -1850,6 +1923,11 @@ function _partesFecha(v) {
  * total, pero SI aparecen en el `detalle` de su dia: el Jefe quiere ver
  * que paso, no un recorte.
  *
+ * Los CANJES (compensaciones) viajan aparte, en `canjes`/`proximosCanjes` y
+ * los totales `*Canje*`: NO se meten en `dias`, porque un dia solo-canje
+ * quedaria con 0/0 horas y el cliente lo pintaria como rechazado. Solo
+ * entran Aprobados y Pendientes (sirven para ver la cobertura del turno).
+ *
  * @param {number|string} [anio]
  * @param {number|string} [mes] 1-12
  */
@@ -1954,12 +2032,61 @@ function apiCalendario(anio, mes) {
   });
   feriadosMes.sort(function (a, b) { return a.dia - b.dia; });
 
+  // ---- Canjes (aditivo) ----
+  const mapaNombres = _mapaNombres();
+  const canjesVisibles = _leerCanjes().filter(function (c) {
+    if (c.estado !== 'Aprobada' && c.estado !== 'Pendiente') return false;
+    return yo.rol !== 'Supervisor' || c.email === yo.email;
+  });
+  const cmpCanje = function (a, b, ka, kb) {
+    if (ka !== kb) return ka - kb;
+    return a.supervisor < b.supervisor ? -1 : (a.supervisor > b.supervisor ? 1 : 0);
+  };
+
+  let totalCanjeAprobadas = 0, cantCanjeAprobados = 0, totalCanjePendientes = 0, cantCanjePendientes = 0;
+  const canjesMes = [];
+  canjesVisibles.forEach(function (c) {
+    if (!c.partes || c.partes.anio !== anioNum || c.partes.mes !== mesNum) return;
+    if (c.estado === 'Aprobada') { totalCanjeAprobadas += c.horas; cantCanjeAprobados++; }
+    else { totalCanjePendientes += c.horas; cantCanjePendientes++; }
+    canjesMes.push({
+      id: c.id, dia: c.partes.dia, supervisor: c.supervisor,
+      iniciales: _iniciales(c.supervisor || mapaNombres[c.email]),
+      horas: c.horas, tipoCanje: c.tipo, estado: c.estado
+    });
+  });
+  canjesMes.sort(function (a, b) { return cmpCanje(a, b, a.dia, b.dia); });
+
+  // Esta semana y la siguiente (lunes a domingo, 14 dias) segun "hoy" del
+  // servidor, sin importar el mes que se esta mirando. Aritmetica UTC.
+  const hp = _hoyPartes();
+  const hoyUTC = Date.UTC(hp.anio, hp.mes - 1, hp.dia);
+  const dowHoy = new Date(hoyUTC).getUTCDay();
+  const desde = _partesDeUTC(hoyUTC - ((dowHoy + 6) % 7) * 86400000);
+  const hasta = _partesDeUTC(hoyUTC - ((dowHoy + 6) % 7) * 86400000 + 13 * 86400000);
+  const numDesde = _numPartes(desde), numHasta = _numPartes(hasta);
+  const proximos = [];
+  canjesVisibles.forEach(function (c) {
+    if (!c.partes) return;
+    const n = _numPartes(c.partes);
+    if (n < numDesde || n > numHasta) return;
+    proximos.push({ n: n, fechaClave: _clavePartes(c.partes), supervisor: c.supervisor, estado: c.estado });
+  });
+  proximos.sort(function (a, b) { return cmpCanje(a, b, a.n, b.n); });
+  const proximosCanjes = proximos.map(function (x) {
+    return { fechaClave: x.fechaClave, supervisor: x.supervisor, estado: x.estado };
+  });
+
   return {
     anio: anioNum, mes: mesNum, dias: diasArray,
     totalAprobadas: totalAprobadas, totalPendientes: totalPendientes,
     totalAprobadasLiq: totalAprobadasLiq, totalAprobadasComp: totalAprobadasComp,
     porSupervisor: porSupervisorArray,
-    feriados: feriadosMes, vigencia: CONFIG.VIGENCIA_LIQUIDACION
+    feriados: feriadosMes, vigencia: CONFIG.VIGENCIA_LIQUIDACION,
+    canjes: canjesMes,
+    totalCanjeAprobadas: totalCanjeAprobadas, cantCanjeAprobados: cantCanjeAprobados,
+    totalCanjePendientes: totalCanjePendientes, cantCanjePendientes: cantCanjePendientes,
+    proximosCanjes: proximosCanjes
   };
 }
 
@@ -1980,8 +2107,10 @@ function apiCalendario(anio, mes) {
  * esta hoja algun dia supera ~2000 filas, agregar un parametro anio para
  * no traer todo el historico de una.
  *
- * Solo hoja Solicitudes (HE): las Compensaciones no tienen "Linea" y no
- * son lo que pide este panel.
+ * Devuelve ademas los CANJES (hoja Compensaciones, aprobados, pendientes y
+ * rechazados) en `canjes`, con el mismo alcance por rol. Un canje no tiene
+ * Linea ni tipo de dia ni circuito: el cliente los muestra aparte y NUNCA
+ * los suma a las horas extra.
  *
  * NO devuelve objetos Date: google.script.run los serializa con corrimiento
  * de zona horaria. Se manda {anio,mes,dia} (via _partesFecha, null si la
@@ -1989,7 +2118,7 @@ function apiCalendario(anio, mes) {
  * solo para mostrar. NO devuelve email ni token: no le hacen falta al
  * cliente y el token jamas tiene que salir del mail de aprobacion.
  *
- * @returns {{solicitudes: Array}}
+ * @returns {{solicitudes: Array, canjes: Array}}
  */
 function apiConsulta() {
   const yo = _identificar();
@@ -2023,7 +2152,16 @@ function apiConsulta() {
     }
   }
 
-  return { solicitudes: solicitudes };
+  const canjes = _leerCanjes()
+    .filter(function (c) { return yo.rol !== 'Supervisor' || c.email === yo.email; })
+    .map(function (c) {
+      return {
+        id: c.id, supervisor: c.supervisor, fecha: c.partes, fechaTexto: c.fechaTexto,
+        horas: c.horas, tipoCanje: c.tipo, estado: c.estado, comentario: c.comentario
+      };
+    });
+
+  return { solicitudes: solicitudes, canjes: canjes };
 }
 
 // ==================== AUXILIARES ====================
@@ -2035,6 +2173,83 @@ function _idx(encabezados, nombre) {
   const i = encabezados.indexOf(nombre);
   if (i === -1) throw new Error('No se encontro la columna "' + nombre + '" en los encabezados.');
   return i;
+}
+
+/** {anio,mes,dia} -> "yyyy-MM-dd", o null si no hay partes. */
+function _clavePartes(p) {
+  if (!p) return null;
+  return p.anio + '-' + _pad2(p.mes) + '-' + _pad2(p.dia);
+}
+
+/** {anio,mes,dia} -> entero comparable anio*10000+mes*100+dia (null -> 0). */
+function _numPartes(p) {
+  if (!p) return 0;
+  return p.anio * 10000 + p.mes * 100 + p.dia;
+}
+
+/** Milisegundos UTC (medianoche) -> {anio,mes,dia}. Solo aritmetica UTC. */
+function _partesDeUTC(ms) {
+  const d = new Date(ms);
+  return { anio: d.getUTCFullYear(), mes: d.getUTCMonth() + 1, dia: d.getUTCDate() };
+}
+
+/** "Hoy" como {anio,mes,dia} en CONFIG.TZ (no en la zona del servidor). */
+function _hoyPartes() {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(Utilities.formatDate(new Date(), CONFIG.TZ, 'yyyy-MM-dd'));
+  return { anio: Number(m[1]), mes: Number(m[2]), dia: Number(m[3]) };
+}
+
+/**
+ * Mapa {emailNormalizado: nombre} del directorio, armado UNA vez. Usar esto
+ * dentro de un bucle: nombreDe() relee el directorio en cada llamada.
+ */
+function _mapaNombres() {
+  const mapa = {};
+  _directorio().forEach(function (p) { mapa[p.email] = p.nombre; });
+  return mapa;
+}
+
+/** Iniciales de un nombre: primera letra de cada palabra, mayuscula, maximo 3. */
+function _iniciales(nombre) {
+  return String(nombre || '').trim().split(/\s+/).filter(Boolean)
+    .map(function (w) { return w.charAt(0).toUpperCase(); })
+    .slice(0, 3).join('');
+}
+
+/**
+ * Lector UNICO de la hoja Compensaciones (canjes), una sola lectura.
+ * Sin filtro de rol ni de estado: quien la use filtra segun su caso.
+ * @returns {Array<{id:string, supervisor:string, email:string,
+ *   partes:({anio:number,mes:number,dia:number}|null), fechaTexto:string,
+ *   horas:number, tipo:string, estado:string, comentario:string}>}
+ */
+function _leerCanjes() {
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SH.COMP);
+  if (!sh) return [];
+  const d = sh.getDataRange().getValues();
+  if (d.length < 2) return [];
+  const enc = d[0];
+  const cId = _idx(enc, 'ID'), cSup = _idx(enc, 'Supervisor'), cEmail = _idx(enc, 'Email'),
+        cFecha = _idx(enc, 'Fecha solicitada'), cHoras = _idx(enc, 'Horas a compensar'),
+        cTipo = _idx(enc, 'Tipo'), cEstado = _idx(enc, 'Estado'), cCom = _idx(enc, 'Comentario');
+  const nombres = _mapaNombres();
+  const out = [];
+  for (let i = 1; i < d.length; i++) {
+    if (!d[i][cId]) continue;
+    const email = _normEmail(d[i][cEmail]);
+    out.push({
+      id: String(d[i][cId]),
+      supervisor: String(d[i][cSup] || '').trim() || nombres[email] || '',
+      email: email,
+      partes: _partesFecha(d[i][cFecha]),
+      fechaTexto: _fmtFecha(d[i][cFecha]),
+      horas: parseFloat(d[i][cHoras]) || 0,
+      tipo: String(d[i][cTipo] || ''),
+      estado: String(d[i][cEstado] || ''),
+      comentario: String(d[i][cCom] || '')
+    });
+  }
+  return out;
 }
 
 function _mailAprobacion(o) {

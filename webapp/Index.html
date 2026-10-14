@@ -183,11 +183,8 @@
           <label class="filtro-full">Supervisor
             <select id="conJefeSupervisor"><option value="Todos">Todos</option></select>
           </label>
-          <label>Mes
-            <select id="conJefeMes"><option value="Todos">Todos</option></select>
-          </label>
-          <label>Semana
-            <select id="conJefeSemana"><option value="">Todas</option></select>
+          <label>Movimiento
+            <select id="conJefeMov"><option value="Todo">Todo</option><option value="HE">Horas extra</option><option value="CP">Canjes</option></select>
           </label>
           <label>Estado
             <select id="conJefeEstado">
@@ -196,6 +193,12 @@
               <option value="Pendiente">Pendiente</option>
               <option value="Rechazada">Rechazada</option>
             </select>
+          </label>
+          <label>Mes
+            <select id="conJefeMes"><option value="Todos">Todos</option></select>
+          </label>
+          <label>Semana
+            <select id="conJefeSemana"><option value="">Todas</option></select>
           </label>
           <label>Linea
             <select id="conJefeLinea">
@@ -297,11 +300,8 @@
           <label class="filtro-full">Supervisor
             <select id="conPersonasSupervisor"><option value="Todos">Todos</option></select>
           </label>
-          <label>Mes
-            <select id="conPersonasMes"><option value="Todos">Todos</option></select>
-          </label>
-          <label>Semana
-            <select id="conPersonasSemana"><option value="">Todas</option></select>
+          <label>Movimiento
+            <select id="conPersonasMov"><option value="Todo">Todo</option><option value="HE">Horas extra</option><option value="CP">Canjes</option></select>
           </label>
           <label>Estado
             <select id="conPersonasEstado">
@@ -310,6 +310,12 @@
               <option value="Pendiente">Pendiente</option>
               <option value="Rechazada">Rechazada</option>
             </select>
+          </label>
+          <label>Mes
+            <select id="conPersonasMes"><option value="Todos">Todos</option></select>
+          </label>
+          <label>Semana
+            <select id="conPersonasSemana"><option value="">Todas</option></select>
           </label>
           <label>Linea
             <select id="conPersonasLinea">
@@ -458,25 +464,29 @@
       </div>
       <div class="modal-body">
         <div id="calDiaTipo"></div>
-        <div class="tabla-wrap">
-          <table class="tabla tabla-caldia">
-            <thead>
-              <tr>
-                <th>Supervisor</th>
-                <th class="num-col">Horas</th>
-                <th>Linea</th>
-                <th>Motivo</th>
-                <th>Estado</th>
-              </tr>
-            </thead>
-            <tbody id="calDiaTablaBody"><!-- filas via JS --></tbody>
-          </table>
-        </div>
-        <div class="calc-row calc-row-pend" id="calDiaPendRow" hidden>
-          <span>Pendientes (no suman)</span><b class="num" id="calDiaPend">0,0 hs</b>
-        </div>
-        <div class="calc-row calc-result cal-dia-total">
-          <span>Total aprobado del dia</span><b class="num" id="calDiaTotal">0,0 hs</b>
+        <div id="calDiaCanjes"></div>
+        <div id="calDiaHE">
+          <h3 class="eyebrow">Horas extra</h3>
+          <div class="tabla-wrap">
+            <table class="tabla tabla-caldia">
+              <thead>
+                <tr>
+                  <th>Supervisor</th>
+                  <th class="num-col">Horas</th>
+                  <th>Linea</th>
+                  <th>Motivo</th>
+                  <th>Estado</th>
+                </tr>
+              </thead>
+              <tbody id="calDiaTablaBody"><!-- filas via JS --></tbody>
+            </table>
+          </div>
+          <div class="calc-row calc-row-pend" id="calDiaPendRow" hidden>
+            <span>Pendientes (no suman)</span><b class="num" id="calDiaPend">0,0 hs</b>
+          </div>
+          <div class="calc-row calc-result cal-dia-total">
+            <span>Total aprobado del dia</span><b class="num" id="calDiaTotal">0,0 hs</b>
+          </div>
         </div>
       </div>
       <div class="modal-footer">

@@ -813,6 +813,36 @@
   .cal-sup-pend { font-size: 10.5px; font-weight: 700; color: var(--amber-text); margin-left: 4px; }
   .cal-resumen-pend { margin-bottom: 10px; }
 
+  /* ==================== CANJES (calendario y consulta) ==================== */
+  /* Canje = compensacion (dia libre a cuenta de saldo). Se marca con borde
+     PUNTEADO + iniciales de quien esta de canje: nunca solo color. Va despues
+     de .is-hoy a proposito, para que el borde punteado gane. */
+  .cal-day.tiene-canje { border: 1px dashed var(--text); gap: 1px; padding-bottom: 10px; }
+  .cal-day.is-hoy.tiene-canje { border-width: 2px; }
+  .cal-day-cj {
+    position: absolute; bottom: 2px; left: 2px; right: 2px; text-align: center;
+    font-size: 8.5px; font-weight: 800; line-height: 1;
+    color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: clip;
+  }
+  .cal-day-cj.is-pend { color: var(--amber-text); }
+  .cal-day.tiene-canje.solo-pend { border-color: var(--amber-text); }
+  .cal-day.is-solo-canje { color: var(--text); cursor: pointer; }
+  .cal-resumen-canje { font-size: 12.5px; color: var(--muted); margin-bottom: 10px; }
+  .cal-resumen-canje b { color: var(--text); }
+  .cal-proximos {
+    margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border);
+    font-size: 12.5px; display: flex; flex-direction: column; gap: 4px;
+  }
+  .con-resumen-canje { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); }
+  .con-resumen-canje .kpi-value { font-size: 22px; }
+  .con-resumen-canje.es-principal { margin-top: 0; padding-top: 0; border-top: 0; }
+  .con-resumen-canje.es-principal .kpi-value { font-size: 34px; }
+  .sol-tipo.is-canje { border: 1px dashed var(--text); color: var(--text); }
+  .cal-dia-canjes { display: flex; flex-direction: column; gap: 8px; margin: 6px 0 12px; }
+  .cal-dia-canjes li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 8px; font-size: 12.5px; }
+  #calDiaHE > .eyebrow { margin: 0 0 6px; }
+  .cal-dia-canjes .cj-quien { display: flex; align-items: center; gap: 6px; min-width: 0; font-weight: 700; }
+
   /* ==================== PANEL CONSULTA (Jefe / Personas) ==================== */
   .filtros-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 8px; margin-bottom: 12px; }
   .filtro-full { grid-column: 1 / -1; }

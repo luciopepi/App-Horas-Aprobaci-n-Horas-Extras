@@ -236,11 +236,13 @@
     (data.misCompensaciones || []).forEach(function (s) {
       lista.push({
         id: s.id, tipo: 'CP',
-        titulo: 'Compensacion · ' + (s.tipo || ''),
+        titulo: fmt(s.horas) + ' hs · Canje · ' + (s.tipo || ''),
         fecha: s.fecha, linea: '-', estado: s.estado
       });
     });
-    lista.sort(function (a, b) { return a.id < b.id ? 1 : -1; }); // el ID trae fecha-hora: mas nuevo primero
+    // El ID trae la fecha-hora DESPUES del prefijo (HE-/CP-): se compara sin
+    // el prefijo, si no todas las HE ('HE-' > 'CP-') van antes que los canjes.
+    lista.sort(function (a, b) { return a.id.slice(3) < b.id.slice(3) ? 1 : -1; }); // mas nuevo primero
     return lista;
   }
 
@@ -282,7 +284,7 @@
       var info = chipInfo(s.estado);
       li.innerHTML =
         '<div class="sol-main">' +
-          '<span class="sol-tipo">' + esc(s.tipo) + '</span>' +
+          '<span class="sol-tipo">' + esc(s.tipo === 'CP' ? 'CJ' : s.tipo) + '</span>' +
           '<div class="sol-info"><strong>' + esc(s.titulo) + '</strong><span class="sol-meta">' + esc(s.fecha) + (s.linea && s.linea !== '-' ? ' · ' + esc(s.linea) : '') + '</span></div>' +
         '</div>' +
         '<span class="chip ' + info.clase + '">' + svgIcon(info.icono, 'icon-14') + info.texto + '</span>' +
@@ -538,6 +540,9 @@
   // Las mismas que valida el alta por la WebApp. El filtro las ofrece siempre,
   // aunque todavia no haya ninguna solicitud cargada con esa linea.
   var LINEAS_FIJAS = ['L1', 'L2', 'L3', 'Varias'];
+  // Dia de semana corto indexado por getUTCDay() (0=domingo), para la linea
+  // "De canje esta semana y la proxima".
+  var DS_CORTO = ['dom', 'lun', 'mar', 'mie', 'jue', 'vie', 'sab'];
 
   // Semana ISO 8601 a partir de partes de fecha (todo en UTC para que la
   // aritmetica de dias sea exacta, sin corrimientos de zona horaria).
@@ -617,7 +622,63 @@
   }
   function calVacioHTML() {
     return '<div class="estado-vacio">' + svgIcon('calendar', 'icon-32') +
-      '<strong>No hubo horas extra en este mes</strong><span>Elegi otro mes con las flechas de arriba.</span></div>';
+      '<strong>No hubo horas extra ni canjes en este mes</strong><span>Elegi otro mes con las flechas de arriba.</span></div>';
+  }
+
+  // Resume los canjes de UN dia para la celda: iniciales (hasta 2 personas;
+  // con 3 o mas, "C3"), "?" en las pendientes y los nombres para el aria-label.
+  // Las aprobadas van primero. Una persona con una aprobada y una pendiente
+  // el mismo dia cuenta como aprobada.
+  function resumenCanjesDia(cj) {
+    var personas = [], idx = {};
+    cj.aprob.concat(cj.pend).forEach(function (c) {
+      var k = String(c.supervisor);
+      if (!Object.prototype.hasOwnProperty.call(idx, k)) {
+        idx[k] = personas.length;
+        personas.push({ nombre: c.supervisor, iniciales: c.iniciales || '', pend: true });
+      }
+      if (c.estado === 'Aprobada') personas[idx[k]].pend = false;
+    });
+    var todasPend = personas.every(function (p) { return p.pend; });
+    var texto = personas.length >= 3
+      ? 'C' + personas.length
+      : personas.map(function (p) { return p.iniciales + (p.pend ? '?' : ''); }).join(' ');
+    var nombres = personas.map(function (p) { return p.nombre + (p.pend ? ' (pendiente)' : ''); }).join(', ');
+    return { texto: texto, soloPend: todasPend, nombres: nombres };
+  }
+
+  // "jue 15, vie 16 y lun 19 (pendiente)" por persona. Si los dias de la
+  // lista cruzan de mes, todos llevan dia/mes ("vie 30/10 y lun 2/11").
+  function proximosCanjesHTML(lista) {
+    var titulo = '<span class="eyebrow">De canje esta semana y la próxima</span>';
+    if (!lista || !lista.length) {
+      return '<div class="cal-proximos">' + titulo + '<span>Nadie de canje esta semana ni la próxima.</span></div>';
+    }
+    var porPersona = {}, orden = [], meses = {};
+    lista.forEach(function (x) {
+      var p = String(x.fechaClave).split('-');
+      var a = Number(p[0]), m = Number(p[1]), d = Number(p[2]);
+      meses[a + '-' + m] = true;
+      if (!porPersona[x.supervisor]) { porPersona[x.supervisor] = {}; orden.push(x.supervisor); }
+      var dias = porPersona[x.supervisor];
+      var previo = dias[x.fechaClave];
+      // Si el mismo dia hay una aprobada y una pendiente, manda la aprobada.
+      if (!previo || x.estado === 'Aprobada') dias[x.fechaClave] = { a: a, m: m, d: d, pend: x.estado !== 'Aprobada' };
+    });
+    var cruza = Object.keys(meses).length > 1;
+    orden.sort(function (a, b) { return String(a).localeCompare(String(b), 'es'); });
+    var lineas = orden.map(function (nombre) {
+      var items = Object.keys(porPersona[nombre]).sort().map(function (k) {
+        var it = porPersona[nombre][k];
+        var dow = new Date(Date.UTC(it.a, it.m - 1, it.d)).getUTCDay();
+        return DS_CORTO[dow] + ' ' + it.d + (cruza ? '/' + it.m : '') + (it.pend ? ' (pendiente)' : '');
+      });
+      var texto = items.length > 1
+        ? items.slice(0, -1).join(', ') + ' y ' + items[items.length - 1]
+        : items[0];
+      return '<span><b>' + esc(nombre) + '</b>: ' + esc(texto) + '</span>';
+    });
+    return '<div class="cal-proximos">' + titulo + lineas.join('') + '</div>';
   }
 
   // Una tarjeta de calendario por vista (Supervisor/Jefe/Personas). La
@@ -646,6 +707,14 @@
       var feriadoPorDia = {};
       (data.feriados || []).forEach(function (f) { feriadoPorDia[f.dia] = f.nombre || ''; });
 
+      // Canjes (compensaciones) por dia. Viajan aparte de `dias` a proposito:
+      // un dia solo-canje no tiene horas extra y se pintaria como rechazado.
+      var canjePorDia = {};
+      (data.canjes || []).forEach(function (c) {
+        if (!canjePorDia[c.dia]) canjePorDia[c.dia] = { aprob: [], pend: [] };
+        (c.estado === 'Aprobada' ? canjePorDia[c.dia].aprob : canjePorDia[c.dia].pend).push(c);
+      });
+
       var offset = primerDiaSemanaLunes(data.anio, data.mes - 1);
       var totalDias = diasEnMes(data.anio, data.mes - 1);
       var esMesActual = data.anio === hoy.getFullYear() && data.mes === hoy.getMonth() + 1;
@@ -659,6 +728,15 @@
         var esFeriado = Object.prototype.hasOwnProperty.call(feriadoPorDia, dia);
         var nombreFeriado = feriadoPorDia[dia] || '';
         var badgeFerHTML = esFeriado ? '<span class="cal-day-fer" aria-hidden="true">F</span>' : '';
+        var cjDia = canjePorDia[dia];
+        var cjRes = cjDia ? resumenCanjesDia(cjDia) : null;
+        var cjMarcaHTML = '';
+        var cjAria = '';
+        if (cjRes) {
+          clases += ' tiene-canje' + (cjRes.soloPend ? ' solo-pend' : '');
+          cjMarcaHTML = '<span class="cal-day-cj' + (cjRes.soloPend ? ' is-pend' : '') + '" aria-hidden="true">' + esc(cjRes.texto) + '</span>';
+          cjAria = ', de canje: ' + cjRes.nombres;
+        }
         if (info) {
           var nSolic = info.detalle.length;
           var partesEtiqueta = [];
@@ -671,7 +749,7 @@
           if (!partesEtiqueta.length) partesEtiqueta.push('sin horas aprobadas ni pendientes, con rechazadas');
           var aria = dia + ' de ' + MESES[data.mes - 1].toLowerCase() + ', ' + partesEtiqueta.join(', ') + ', ' +
             nSolic + (nSolic === 1 ? ' solicitud' : ' solicitudes') +
-            (esFeriado ? ', feriado' + (nombreFeriado ? ' (' + nombreFeriado + ')' : '') : '');
+            (esFeriado ? ', feriado' + (nombreFeriado ? ' (' + nombreFeriado + ')' : '') : '') + cjAria;
           var horasHTML = '';
           if (info.horasAprobadas > 0 || info.horasPendientes > 0) {
             horasHTML = '<span class="cal-day-linea-horas">' +
@@ -684,6 +762,17 @@
             '<span class="cal-day-num">' + dia + '</span>' +
             horasHTML +
             '<span class="cal-day-dot" aria-hidden="true"></span>' +
+            cjMarcaHTML +
+            '</button>';
+        } else if (cjRes) {
+          // Dia con canje pero sin horas extra: boton propio, sin tinte de estado.
+          var ariaCj = dia + ' de ' + MESES[data.mes - 1].toLowerCase() + cjAria +
+            (esFeriado ? ', feriado' + (nombreFeriado ? ' (' + nombreFeriado + ')' : '') : '');
+          celdas += '<button type="button" class="cal-day is-solo-canje' + (esHoy ? ' is-hoy' : '') +
+            ' tiene-canje' + (cjRes.soloPend ? ' solo-pend' : '') + '" data-dia="' + dia + '" aria-label="' + esc(ariaCj) + '">' +
+            badgeFerHTML +
+            '<span class="cal-day-num">' + dia + '</span>' +
+            cjMarcaHTML +
             '</button>';
         } else {
           // Div vacio (sin solicitudes ese dia): no es interactivo, asi que
@@ -704,40 +793,60 @@
       var weekdayHTML = DIAS_SEMANA_CORTO.map(function (d) { return '<div class="cal-weekday">' + d + '</div>'; }).join('');
 
       var resumenHTML = '';
-      if (data.totalAprobadas > 0 || data.totalPendientes > 0) {
-        var maxHoras = Math.max.apply(null, (data.porSupervisor || []).map(function (p) { return p.horasAprobadas; }).concat([1]));
-        var filasSup = (data.porSupervisor || []).map(function (p, i) {
-          var pct = maxHoras > 0 ? Math.max(4, Math.round((p.horasAprobadas / maxHoras) * 100)) : 4;
-          return '<li class="equipo-item" style="--i:' + i + '">' +
-            '<div class="equipo-info">' + svgIcon('user', 'icon-16') + '<strong>' + esc(p.nombre) + '</strong></div>' +
-            '<div class="equipo-bar-track"><div class="equipo-bar" style="--pct:' + pct + '%"></div></div>' +
-            '<span class="equipo-saldo num">' + fmt(p.horasAprobadas) + ' hs' +
-              (p.horasPendientes > 0 ? '<span class="cal-sup-pend">+' + fmtCorto(p.horasPendientes) + 'p</span>' : '') +
-              '</span>' +
-            '</li>';
-        }).join('');
-        var pendLineaHTML = data.totalPendientes > 0
-          ? '<div class="cal-resumen-pend"><span class="chip chip-pendiente">' + svgIcon('clock', 'icon-14') +
-            '+' + fmt(data.totalPendientes) + ' hs pendientes</span></div>'
-          : '';
-        resumenHTML =
-          '<div class="cal-resumen">' +
+      var hayHE = data.totalAprobadas > 0 || data.totalPendientes > 0;
+      var hayCanjes = data.cantCanjeAprobados > 0 || data.cantCanjePendientes > 0;
+      if (hayHE || hayCanjes) {
+        var heHTML = '';
+        if (hayHE) {
+          var maxHoras = Math.max.apply(null, (data.porSupervisor || []).map(function (p) { return p.horasAprobadas; }).concat([1]));
+          var filasSup = (data.porSupervisor || []).map(function (p, i) {
+            var pct = maxHoras > 0 ? Math.max(4, Math.round((p.horasAprobadas / maxHoras) * 100)) : 4;
+            return '<li class="equipo-item" style="--i:' + i + '">' +
+              '<div class="equipo-info">' + svgIcon('user', 'icon-16') + '<strong>' + esc(p.nombre) + '</strong></div>' +
+              '<div class="equipo-bar-track"><div class="equipo-bar" style="--pct:' + pct + '%"></div></div>' +
+              '<span class="equipo-saldo num">' + fmt(p.horasAprobadas) + ' hs' +
+                (p.horasPendientes > 0 ? '<span class="cal-sup-pend">+' + fmtCorto(p.horasPendientes) + 'p</span>' : '') +
+                '</span>' +
+              '</li>';
+          }).join('');
+          var pendLineaHTML = data.totalPendientes > 0
+            ? '<div class="cal-resumen-pend"><span class="chip chip-pendiente">' + svgIcon('clock', 'icon-14') +
+              '+' + fmt(data.totalPendientes) + ' hs pendientes</span></div>'
+            : '';
+          heHTML =
             '<div class="cal-resumen-total"><span class="eyebrow">Total del mes</span><b class="num">' + fmt(data.totalAprobadas) + ' hs</b></div>' +
             pendLineaHTML +
-            '<ul class="equipo-list">' + filasSup + '</ul>' +
-          '</div>';
+            '<ul class="equipo-list">' + filasSup + '</ul>';
+        }
+        // Los canjes se informan aparte: nunca se suman al total de horas extra.
+        var canjeHTML = '';
+        if (hayCanjes) {
+          var nCj = data.cantCanjeAprobados || 0;
+          var nCjPend = data.cantCanjePendientes || 0;
+          canjeHTML =
+            '<div class="cal-resumen-canje">Canjes del mes: <b class="num">' + fmt(data.totalCanjeAprobadas) + ' hs</b> · ' +
+              nCj + (nCj === 1 ? ' canje' : ' canjes') + '</div>' +
+            (nCjPend > 0
+              ? '<div class="cal-resumen-pend"><span class="chip chip-pendiente">' + svgIcon('clock', 'icon-14') +
+                '+' + nCjPend + (nCjPend === 1 ? ' canje pendiente' : ' canjes pendientes') + '</span></div>'
+              : '');
+        }
+        resumenHTML = '<div class="cal-resumen">' + canjeHTML + heHTML + '</div>';
       }
 
-      var vacioMes = !data.dias || !data.dias.length;
-      var leyendaHTML = '<p class="cal-leyenda">F = feriado cargado &middot; Sab/dom y feriados desde ' +
+      var vacioMes = (!data.dias || !data.dias.length) && (!data.canjes || !data.canjes.length);
+      var leyendaHTML = '<p class="cal-leyenda">F = feriado cargado &middot; Iniciales = de canje (? = pendiente) &middot; Sab/dom y feriados desde ' +
         (data.vigencia ? data.vigencia.split('-').reverse().join('/') : '01/08/2026') + ' se liquidan</p>';
       elBody.innerHTML = '<div class="cal-grid">' + weekdayHTML + celdas + '</div>' +
+        proximosCanjesHTML(data.proximosCanjes) +
         (vacioMes ? calVacioHTML() : resumenHTML) + leyendaHTML;
 
       elBody.querySelectorAll('.cal-day[data-dia]').forEach(function (btn) {
         btn.addEventListener('click', function () {
-          var d = porDia[Number(btn.dataset.dia)];
-          if (d) abrirDetalleDia(data, d);
+          var n = Number(btn.dataset.dia);
+          var cj = canjePorDia[n];
+          var d = porDia[n];
+          if (d || cj) abrirDetalleDia(data, n, d, cj ? cj.aprob.concat(cj.pend) : []);
         });
       });
     }
@@ -785,21 +894,32 @@
   var overlayCalDia = document.getElementById('overlayCalDia');
   var tituloModalCalDia = document.getElementById('tituloModalCalDia');
   var calDiaTipo = document.getElementById('calDiaTipo');
+  var calDiaCanjes = document.getElementById('calDiaCanjes');
+  var calDiaHE = document.getElementById('calDiaHE');
   var calDiaTablaBody = document.getElementById('calDiaTablaBody');
   var calDiaTotal = document.getElementById('calDiaTotal');
   var calDiaPendRow = document.getElementById('calDiaPendRow');
   var calDiaPend = document.getElementById('calDiaPend');
 
-  function abrirDetalleDia(data, diaInfo) {
-    var fechaObj = new Date(data.anio, data.mes - 1, diaInfo.dia);
-    var nombreDiaSemana = DIAS_SEMANA_LARGO[(fechaObj.getDay() + 6) % 7];
-    tituloModalCalDia.textContent = nombreDiaSemana + ' ' + diaInfo.dia + ' de ' +
+  // diaInfo: horas extra del dia (undefined si el dia solo tiene canjes).
+  // canjes: canjes Aprobados/Pendientes del dia (puede ser []).
+  function abrirDetalleDia(data, dia, diaInfo, canjes) {
+    canjes = canjes || [];
+    // Dia de semana por aritmetica UTC: nunca getDay() sobre una fecha local.
+    var fechaObj = new Date(Date.UTC(data.anio, data.mes - 1, dia));
+    var nombreDiaSemana = DIAS_SEMANA_LARGO[(fechaObj.getUTCDay() + 6) % 7];
+    tituloModalCalDia.textContent = nombreDiaSemana + ' ' + dia + ' de ' +
       MESES[data.mes - 1].toLowerCase() + ' de ' + data.anio;
 
     // tipoDia/liquidable/feriadoNombre vienen resueltos del servidor
     // (clasificarDia/circuitoHE): el cliente solo los muestra, no los
     // recalcula.
-    if (diaInfo.liquidable) {
+    if (!diaInfo) {
+      var ferNombre = null;
+      (data.feriados || []).forEach(function (f) { if (f.dia === dia) ferNombre = f.nombre || ''; });
+      calDiaTipo.innerHTML = ferNombre === null ? ''
+        : '<span class="muted-text">Feriado' + (ferNombre ? ' (' + esc(ferNombre) + ')' : '') + '</span>';
+    } else if (diaInfo.liquidable) {
       calDiaTipo.innerHTML = '<span class="chip chip-liq">' + svgIcon('banknote', 'icon-14') +
         'Liquidable &middot; ' + esc(diaInfo.tipoDia) +
         (diaInfo.feriadoNombre ? ' (' + esc(diaInfo.feriadoNombre) + ')' : '') + '</span>';
@@ -811,6 +931,30 @@
     } else {
       calDiaTipo.innerHTML = '';
     }
+
+    if (canjes.length) {
+      calDiaCanjes.innerHTML = '<h3 class="eyebrow">De canje</h3><ul class="cal-dia-canjes">' +
+        canjes.map(function (c) {
+          var info = chipInfo(c.estado);
+          return '<li>' +
+            '<span class="cj-quien">' + svgIcon('user', 'icon-14') + esc(c.supervisor) + '</span>' +
+            '<span class="muted-text">' + fmt(c.horas) + ' hs · ' + esc(c.tipoCanje) + '</span>' +
+            '<span class="chip ' + info.clase + '">' + svgIcon(info.icono, 'icon-14') + info.texto + '</span>' +
+            '</li>';
+        }).join('') + '</ul>';
+    } else {
+      calDiaCanjes.innerHTML = '';
+    }
+
+    if (!diaInfo) {
+      calDiaHE.hidden = true;
+      calDiaTablaBody.innerHTML = '';
+      calDiaPendRow.hidden = true;
+      calDiaTotal.textContent = fmt(0) + ' hs';
+      abrirModal(overlayCalDia);
+      return;
+    }
+    calDiaHE.hidden = false;
 
     calDiaTablaBody.innerHTML = diaInfo.detalle.map(function (r) {
       var info = chipInfo(r.estado);
@@ -846,6 +990,7 @@
   // Supervisor ya ve sus propias solicitudes en "Mis solicitudes".
   function crearPanelConsulta(prefijo) {
     var elSupervisor = document.getElementById(prefijo + 'Supervisor');
+    var elMov = document.getElementById(prefijo + 'Mov');
     var elMes = document.getElementById(prefijo + 'Mes');
     var elSemana = document.getElementById(prefijo + 'Semana');
     var elEstado = document.getElementById(prefijo + 'Estado');
@@ -864,7 +1009,9 @@
     // Estado = Todos, Supervisor = Todos, Linea = Todas, Tipo de dia = Todos.
     var filtros = {
       supervisor: 'Todos', mesValor: claveHoy, semanaValor: '',
-      estado: 'Todos', linea: 'Todas', tipoDia: 'Todos'
+      estado: 'Todos', linea: 'Todas', tipoDia: 'Todos',
+      // Movimiento: 'Todo' | 'HE' (horas extra) | 'CP' (canjes).
+      mov: 'Todo'
     };
 
     // Clave numerica para ordenar por fecha desc; las filas sin fecha
@@ -877,6 +1024,11 @@
     // (aplicar ambos recortaria la semana ISO y daria un total falso si la
     // semana pisa el mes anterior o siguiente).
     function pasaFila(f) {
+      // 1) Movimiento: SIEMPRE el primer chequeo.
+      if (filtros.mov !== 'Todo' && f.mov !== filtros.mov) return false;
+      // 2) Filtrar por linea o tipo de dia es pedir horas extra: un canje no
+      //    tiene ni una ni otro.
+      if (f.mov === 'CP' && (filtros.linea !== 'Todas' || filtros.tipoDia !== 'Todos')) return false;
       if (filtros.supervisor !== 'Todos' && f.supervisor !== filtros.supervisor) return false;
       if (filtros.estado !== 'Todos' && f.estado !== filtros.estado) return false;
       if (filtros.linea !== 'Todas') {
@@ -975,6 +1127,7 @@
       var vistos = {}, extras = [];
       LINEAS_FIJAS.forEach(function (l) { vistos[l] = true; });
       datos.forEach(function (f) {
+        if (f.mov === 'CP') return; // un canje no tiene linea: no debe aparecer "(sin linea)"
         var l = (f.linea === '' || f.linea == null) ? '(sin linea)' : String(f.linea);
         if (vistos[l]) return;
         vistos[l] = true;
@@ -1014,13 +1167,21 @@
       elSemana.value = filtros.semanaValor;
     }
 
-    // Resumen: SIEMPRE tres cifras separadas (nunca una mezclada). Con
-    // Estado=Rechazada el principal da "0,0 hs" y la chip de rechazadas es
+    // Resumen: las cifras de horas extra y las de canjes van SIEMPRE en
+    // bloques separados: las horas de un canje NUNCA se suman a las horas extra.
+    // Con Estado=Rechazada el principal da "0,0 hs" y la chip de rechazadas es
     // la protagonista: es el comportamiento correcto, no un caso especial.
     function renderResumen(lista) {
       var aprobadas = 0, pendientes = 0, rechazadas = 0, rechCount = 0;
       var liq = 0, comp = 0;
+      var cjAprob = 0, cjAprobN = 0, cjPend = 0, cjPendN = 0, cjRech = 0, cjRechN = 0;
       lista.forEach(function (f) {
+        if (f.mov === 'CP') {
+          if (f.estado === 'Aprobada') { cjAprob += f.horas; cjAprobN++; }
+          else if (f.estado === 'Pendiente') { cjPend += f.horas; cjPendN++; }
+          else if (f.estado === 'Rechazada') { cjRech += f.horas; cjRechN++; }
+          return;
+        }
         if (f.estado === 'Aprobada') {
           aprobadas += f.horas;
           if (f.circuito === 'LIQ') liq += f.horas; else comp += f.horas;
@@ -1037,75 +1198,142 @@
         chips += '<span class="chip chip-rechazada">' + svgIcon('x', 'icon-14') +
           rechCount + (rechCount === 1 ? ' rechazada' : ' rechazadas') + ' · ' + fmt(rechazadas) + ' hs (no suman)</span>';
       }
-      // Una fila cuya "Fecha HE" no se pudo interpretar queda fuera de
-      // cualquier corte por mes o semana. Si no se avisara, el Jefe veria un
-      // total que le falta algo y no tendria como saberlo: en una app de
-      // liquidacion, el error silencioso es el peor de todos.
+      // Una fila cuya fecha no se pudo interpretar queda fuera de cualquier
+      // corte por mes o semana. Si no se avisara, el Jefe veria un total que
+      // le falta algo y no tendria como saberlo: en una app de liquidacion,
+      // el error silencioso es el peor de todos. Cuenta solo el movimiento
+      // elegido.
       var sinFecha = 0;
-      datos.forEach(function (f) { if (!f.fecha) sinFecha++; });
+      datos.forEach(function (f) {
+        if (!f.fecha && (filtros.mov === 'Todo' || f.mov === filtros.mov)) sinFecha++;
+      });
       var aviso = '';
       if (sinFecha > 0 && (filtros.semanaValor || filtros.mesValor !== 'Todos')) {
         aviso = '<div class="con-aviso-sinfecha">' + svgIcon('alertTriangle', 'icon-14') +
           sinFecha + (sinFecha === 1
-            ? ' solicitud con fecha ilegible queda fuera de este corte'
-            : ' solicitudes con fecha ilegible quedan fuera de este corte') +
+            ? ' movimiento con fecha ilegible queda fuera de este corte'
+            : ' movimientos con fecha ilegible quedan fuera de este corte') +
           '. Eleg&iacute; Mes = Todos para verlas.</div>';
       }
 
-      elResumen.innerHTML =
-        '<div class="kpi-label">Horas aprobadas</div>' +
-        '<div class="kpi-value">' + fmt(aprobadas) + ' hs</div>' +
-        '<div class="kpi-sub">Liquidables ' + fmt(liq) + ' hs &middot; Compensables ' + fmt(comp) + ' hs</div>' +
-        (chips ? '<div class="con-resumen-chips">' + chips + '</div>' : '') +
-        aviso;
+      var heHTML = '';
+      if (filtros.mov !== 'CP') {
+        heHTML =
+          '<div class="kpi-label">Horas extra aprobadas</div>' +
+          '<div class="kpi-value">' + fmt(aprobadas) + ' hs</div>' +
+          '<div class="kpi-sub">Liquidables ' + fmt(liq) + ' hs &middot; Compensables ' + fmt(comp) + ' hs</div>' +
+          (chips ? '<div class="con-resumen-chips">' + chips + '</div>' : '');
+      }
+
+      var canjeHTML = '';
+      if (filtros.mov !== 'HE') {
+        if (filtros.mov === 'Todo' && (filtros.linea !== 'Todas' || filtros.tipoDia !== 'Todos')) {
+          canjeHTML = '<div class="con-resumen-canje"><div class="kpi-sub">' +
+            'Con filtro de línea o tipo de día no se muestran canjes.</div></div>';
+        } else {
+          var cjChips = '';
+          if (cjPendN > 0) {
+            cjChips += '<span class="chip chip-pendiente">' + svgIcon('clock', 'icon-14') +
+              cjPendN + (cjPendN === 1 ? ' canje pendiente' : ' canjes pendientes') + ' · ' + fmt(cjPend) + ' hs</span>';
+          }
+          if (cjRechN > 0) {
+            cjChips += '<span class="chip chip-rechazada">' + svgIcon('x', 'icon-14') +
+              cjRechN + (cjRechN === 1 ? ' canje rechazado' : ' canjes rechazados') + ' · ' + fmt(cjRech) + ' hs</span>';
+          }
+          canjeHTML = '<div class="con-resumen-canje' + (filtros.mov === 'CP' ? ' es-principal' : '') + '">' +
+            '<div class="kpi-label">Canjes aprobados</div>' +
+            '<div class="kpi-value">' + fmt(cjAprob) + ' hs</div>' +
+            '<div class="kpi-sub">' + cjAprobN + (cjAprobN === 1 ? ' canje' : ' canjes') +
+              ' · aparte, no se suman a las horas extra</div>' +
+            (cjChips ? '<div class="con-resumen-chips">' + cjChips + '</div>' : '') +
+            '</div>';
+        }
+      }
+
+      elResumen.innerHTML = heHTML + canjeHTML + aviso;
     }
 
     // Desglose por supervisor: mismo patron .equipo-item que el resumen del
     // Calendario (barra --grad-gold sobre horas Aprobadas, sufijo "+Xp" si
-    // ademas tiene Pendientes en el conjunto filtrado).
+    // ademas tiene Pendientes en el conjunto filtrado). Con Movimiento=Todo
+    // la barra y el numero siguen siendo SOLO horas extra y los canjes van en
+    // una linea aparte; con Movimiento=Canjes la barra y el numero son canjes.
     function renderDesglose(lista) {
       var mapa = {};
       var orden = [];
       lista.forEach(function (f) {
         if (f.estado !== 'Aprobada' && f.estado !== 'Pendiente') return;
-        if (!mapa[f.supervisor]) { mapa[f.supervisor] = { horasAprobadas: 0, horasPendientes: 0 }; orden.push(f.supervisor); }
-        if (f.estado === 'Aprobada') mapa[f.supervisor].horasAprobadas += f.horas;
-        else mapa[f.supervisor].horasPendientes += f.horas;
+        if (!mapa[f.supervisor]) {
+          mapa[f.supervisor] = { heAprob: 0, hePend: 0, cjAprob: 0, cjPend: 0 };
+          orden.push(f.supervisor);
+        }
+        var m = mapa[f.supervisor];
+        if (f.mov === 'CP') {
+          if (f.estado === 'Aprobada') m.cjAprob += f.horas; else m.cjPend += f.horas;
+        } else {
+          if (f.estado === 'Aprobada') m.heAprob += f.horas; else m.hePend += f.horas;
+        }
       });
       if (!orden.length) { elDesglose.innerHTML = ''; return; }
+      var soloCanjes = filtros.mov === 'CP';
       var arr = orden.map(function (nombre) {
-        return { nombre: nombre, horasAprobadas: mapa[nombre].horasAprobadas, horasPendientes: mapa[nombre].horasPendientes };
-      }).sort(function (a, b) { return b.horasAprobadas - a.horasAprobadas; });
-      var maxHoras = Math.max.apply(null, arr.map(function (p) { return p.horasAprobadas; }).concat([1]));
+        var m = mapa[nombre];
+        return {
+          nombre: nombre,
+          principal: soloCanjes ? m.cjAprob : m.heAprob,
+          pendiente: soloCanjes ? m.cjPend : m.hePend,
+          cjAprob: m.cjAprob, cjPend: m.cjPend
+        };
+      }).sort(function (a, b) {
+        return (b.principal - a.principal) || String(a.nombre).localeCompare(String(b.nombre), 'es');
+      });
+      var maxHoras = Math.max.apply(null, arr.map(function (p) { return p.principal; }).concat([1]));
       elDesglose.innerHTML = arr.map(function (p, i) {
-        var pct = maxHoras > 0 ? Math.max(4, Math.round((p.horasAprobadas / maxHoras) * 100)) : 4;
+        var pct = maxHoras > 0 ? Math.max(4, Math.round((p.principal / maxHoras) * 100)) : 4;
+        var subCanje = '';
+        if (filtros.mov === 'Todo' && (p.cjAprob > 0 || p.cjPend > 0)) {
+          subCanje = '<div class="equipo-sub">Canje: ' + fmtCorto(p.cjAprob) + ' hs' +
+            (p.cjPend > 0 ? ' +' + fmtCorto(p.cjPend) + 'p' : '') + '</div>';
+        }
         return '<li class="equipo-item" style="--i:' + i + '">' +
           '<div class="equipo-info">' + svgIcon('user', 'icon-16') + '<strong>' + esc(p.nombre) + '</strong></div>' +
+          subCanje +
           '<div class="equipo-bar-track"><div class="equipo-bar" style="--pct:' + pct + '%"></div></div>' +
-          '<span class="equipo-saldo num">' + fmt(p.horasAprobadas) + ' hs' +
-            (p.horasPendientes > 0 ? '<span class="cal-sup-pend">+' + fmtCorto(p.horasPendientes) + 'p</span>' : '') +
+          '<span class="equipo-saldo num">' + fmt(p.principal) + ' hs' +
+            (p.pendiente > 0 ? '<span class="cal-sup-pend">+' + fmtCorto(p.pendiente) + 'p</span>' : '') +
           '</span>' +
           '</li>';
       }).join('');
     }
 
     // Lista detallada: patron .solicitud-item, orden fecha desc (id desc de
-    // desempate). El Motivo SIEMPRE pasa por esc(), sin excepcion.
+    // desempate, sin el prefijo HE-/CP-). El Motivo SIEMPRE pasa por esc(),
+    // sin excepcion.
     function renderLista(lista) {
       if (!lista.length) {
-        elLista.innerHTML = estadoVacio('Ninguna solicitud cumple estos filtros', 'Probá con otros filtros.');
+        elLista.innerHTML = estadoVacio('Ningún movimiento cumple estos filtros', 'Probá con otros filtros.');
         return;
       }
       var ordenada = lista.slice().sort(function (a, b) {
         var ka = claveFecha(a), kb = claveFecha(b);
         if (ka !== kb) return kb - ka;
-        return a.id < b.id ? 1 : -1;
+        return a.id.slice(3) < b.id.slice(3) ? 1 : -1;
       });
       elLista.innerHTML = ordenada.map(function (f, i) {
         var info = chipInfo(f.estado);
         var meta = [f.fechaTexto || '—'];
         if (f.fecha) meta.push('S' + isoSemana(f.fecha.anio, f.fecha.mes, f.fecha.dia).semana);
         meta.push(f.supervisor);
+        if (f.mov === 'CP') {
+          return '<li class="solicitud-item" style="--i:' + i + '">' +
+            '<div class="sol-main">' +
+              '<span class="sol-tipo is-canje">Canje</span>' +
+              '<div class="sol-info"><strong>' + esc(fmt(f.horas) + ' hs · Canje · ' + (f.tipoCanje || '')) + '</strong>' +
+              '<span class="sol-meta">' + esc(meta.join(' · ')) + '</span></div>' +
+            '</div>' +
+            '<span class="chip ' + info.clase + '">' + svgIcon(info.icono, 'icon-14') + info.texto + '</span>' +
+            '</li>';
+        }
         if (f.tipoDia) meta.push(f.tipoDia);
         var chipLiqHTML = f.circuito === 'LIQ'
           ? '<span class="chip chip-liq">' + svgIcon('banknote', 'icon-14') + 'LIQ</span>'
@@ -1129,8 +1357,32 @@
       renderLista(filtrados);
     }
 
+    // Movimiento = Canjes: linea y tipo de dia no aplican (vuelven a
+    // Todas/Todos y se deshabilitan). Se reaplica despues de cada carga
+    // porque deshabilitarControles(false) los habilitaria de nuevo.
+    function aplicarEstadoMov() {
+      var esCP = filtros.mov === 'CP';
+      if (esCP) {
+        filtros.linea = 'Todas';
+        filtros.tipoDia = 'Todos';
+        elLinea.value = 'Todas';
+        elTipoDia.value = 'Todos';
+      }
+      [elLinea, elTipoDia].forEach(function (el) {
+        el.disabled = esCP;
+        if (esCP) {
+          el.title = 'No aplica a canjes';
+          el.setAttribute('aria-disabled', 'true');
+        } else {
+          el.title = '';
+          el.removeAttribute('aria-disabled');
+        }
+      });
+    }
+
     function deshabilitarControles(v) {
       elSupervisor.disabled = v;
+      elMov.disabled = v;
       elMes.disabled = v;
       elEstado.disabled = v;
       elLinea.disabled = v;
@@ -1145,6 +1397,11 @@
       aplicarFiltros();
     });
     elSemana.addEventListener('change', function () { filtros.semanaValor = elSemana.value; aplicarFiltros(); });
+    elMov.addEventListener('change', function () {
+      filtros.mov = elMov.value;
+      aplicarEstadoMov();
+      aplicarFiltros();
+    });
     elEstado.addEventListener('change', function () { filtros.estado = elEstado.value; aplicarFiltros(); });
     elLinea.addEventListener('change', function () { filtros.linea = elLinea.value; aplicarFiltros(); });
     elTipoDia.addEventListener('change', function () { filtros.tipoDia = elTipoDia.value; aplicarFiltros(); });
@@ -1155,11 +1412,14 @@
       filtros.estado = 'Todos';
       filtros.linea = 'Todas';
       filtros.tipoDia = 'Todos';
+      filtros.mov = 'Todo';
+      elMov.value = 'Todo';
       elSupervisor.value = 'Todos';
       elEstado.value = 'Todos';
       elLinea.value = 'Todas';
       elTipoDia.value = 'Todos';
       elMes.value = filtros.mesValor;
+      aplicarEstadoMov();
       poblarSemana();
       aplicarFiltros();
     });
@@ -1174,7 +1434,24 @@
       elLista.innerHTML = '';
       try {
         var data = await llamarServidor('apiConsulta');
-        datos = data.solicitudes || [];
+        // Un solo arreglo con los dos movimientos. Se copia campo por campo
+        // (sin spread): 'mov' distingue HE de canje y los campos que un canje
+        // no tiene (linea, tipo de dia, circuito) quedan en null.
+        datos = [];
+        (data.solicitudes || []).forEach(function (s) {
+          datos.push({
+            mov: 'HE', id: s.id, supervisor: s.supervisor, fecha: s.fecha, fechaTexto: s.fechaTexto,
+            horas: s.horas, linea: s.linea, motivo: s.motivo, estado: s.estado,
+            tipoDia: s.tipoDia, circuito: s.circuito
+          });
+        });
+        (data.canjes || []).forEach(function (c) {
+          datos.push({
+            mov: 'CP', id: c.id, supervisor: c.supervisor, fecha: c.fecha, fechaTexto: c.fechaTexto,
+            horas: c.horas, linea: null, motivo: '', estado: c.estado,
+            tipoDia: null, circuito: null, tipoCanje: c.tipoCanje, comentario: c.comentario
+          });
+        });
         poblarSupervisor();
         poblarLinea();
         poblarMes();
@@ -1190,6 +1467,7 @@
       } finally {
         cargando = false;
         deshabilitarControles(false);
+        aplicarEstadoMov(); // el paso anterior habilita linea/tipo de dia: se reaplica Movimiento
       }
     }
 

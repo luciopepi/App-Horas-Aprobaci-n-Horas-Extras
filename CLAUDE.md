@@ -61,9 +61,10 @@ versión: el alias usa automáticamente la versión más nueva de cada familia.
 
 ## Reglas duras del código
 
-- **Privacidad**: ningún correo real (`@vspt.com.ar`) ni nombre real de empleado en
+- **Privacidad**: ningún correo real del dominio de la empresa ni nombre real de empleado en
   ningún archivo del repo: código, comentarios, ejemplos, tests ni mensajes de commit.
-  Ejemplos con `@ejemplo.invalid` y "Supervisor A". Grep antes de cada commit.
+  Ejemplos con `@ejemplo.invalid` y "Supervisor A". Antes de cada commit:
+  `grep -rniE 'vspt\.com\.ar' . --exclude-dir=.git` tiene que dar cero.
   La URL de la WebApp tampoco va al repo (contiene el dominio de la empresa).
 - **Fechas**: todo día de semana se calcula `_partesFecha()` → `Date.UTC` →
   `getUTCDay()`. Nunca `getDay()` sobre el valor crudo. La zona horaria de la planilla

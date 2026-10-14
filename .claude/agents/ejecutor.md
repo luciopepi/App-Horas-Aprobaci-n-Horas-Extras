@@ -13,7 +13,7 @@ Antes de reportar, verificá:
 - `node --check` sobre el .gs (copiado a .js) y sobre el <script> de JsApp.html.
 - Todo getElementById de JsApp.html tiene su id= en Index.html.
 - Balance de llaves CSS y de tags HTML.
-- Grep de privacidad: cero `vspt.com.ar` y cero nombres reales en el repo.
+- Grep de privacidad: `grep -rniE 'vspt\.com\.ar' . --exclude-dir=.git` en cero y ningún nombre real en el repo.
 - Los casos de prueba del plan, ejecutando la lógica real en un script del
   scratchpad (no una reimplementación a mano).
 - Contraste AA de todo par color/fondo nuevo, calculado.

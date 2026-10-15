@@ -54,6 +54,10 @@ const CONFIG = {
   HORAS_POR_DIA: 8,        // equivalencia para compensacion en dias
   TZ:            'America/Argentina/San_Juan',
 
+  // Cargo (no nombre) con el que firma el mail de canje. El nombre sale de
+  // la hoja Correos, del Jefe que arma el mail.
+  FIRMA_CARGO:   'Jefe de Fraccionamiento · Planta Graffigna',
+
   // Politica FLC-DOC-RH-092: desde esta fecha (inclusive), las horas extra
   // de sabado, domingo o feriado se LIQUIDAN (se pagan) y dejan de sumar al
   // saldo de compensacion. Las de dia de semana, y CUALQUIER hora anterior
@@ -2175,6 +2179,149 @@ function apiConsulta() {
     });
 
   return { solicitudes: solicitudes, canjes: canjes };
+}
+
+// ==================== MAIL DE CANJE ====================
+/**
+ * Horas liquidables (sabado/domingo/feriado con vigencia aplicada) de un mes,
+ * por Fecha HE, agrupadas por supervisor. La clasificacion es la de
+ * circuitoHE(): no se reimplementa aca (misma regla que _desgloseHE y
+ * resumenMensual). Lee la hoja Solicitudes UNA vez.
+ *
+ * @param {number} anio
+ * @param {number} mes 1-12
+ * @returns {{porEmail:Object, total:{sabDom:number,feriado:number,total:number},
+ *            pendientesHE:{cant:number,horas:number}, sinFecha:number}}
+ */
+function _liquidacionMes(anio, mes) {
+  const out = {
+    porEmail: {},
+    total: { sabDom: 0, feriado: 0, total: 0 },
+    pendientesHE: { cant: 0, horas: 0 },
+    sinFecha: 0
+  };
+  const d = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SH.SOL).getDataRange().getValues();
+  if (d.length < 2) return out;
+
+  const enc = d[0];
+  const cSup = _idx(enc, 'Supervisor'), cEmail = _idx(enc, 'Email'), cHoras = _idx(enc, 'Horas'),
+        cEstado = _idx(enc, 'Estado'), cFecha = _idx(enc, 'Fecha HE');
+  const nombres = _mapaNombres();
+
+  for (let i = 1; i < d.length; i++) {
+    const estado = d[i][cEstado];
+    if (estado !== 'Aprobada' && estado !== 'Pendiente') continue;
+    const horas = parseFloat(d[i][cHoras]) || 0;
+    const partes = _partesFecha(d[i][cFecha]);
+
+    if (estado === 'Pendiente') {
+      if (partes && partes.anio === anio && partes.mes === mes) {
+        out.pendientesHE.cant++;
+        out.pendientesHE.horas += horas;
+      }
+      continue;
+    }
+
+    if (!partes) { out.sinFecha++; continue; }
+    if (partes.anio !== anio || partes.mes !== mes) continue;
+    const c = circuitoHE(d[i][cFecha]);
+    if (c.circuito !== 'LIQ') continue;
+
+    const email = _normEmail(d[i][cEmail]);
+    if (!out.porEmail[email]) {
+      out.porEmail[email] = { nombre: nombres[email] || String(d[i][cSup] || '').trim() || 'Sin nombre',
+                              sabDom: 0, feriado: 0, total: 0 };
+    }
+    const f = out.porEmail[email];
+    if (c.tipo === 'Feriado') { f.feriado += horas; out.total.feriado += horas; }
+    else { f.sabDom += horas; out.total.sabDom += horas; }
+    f.total += horas;
+    out.total.total += horas;
+  }
+  return out;
+}
+
+const _MESES_MIN = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto',
+                    'septiembre', 'octubre', 'noviembre', 'diciembre'];
+
+/**
+ * Datos para armar (en el cliente) el mail de un canje aprobado. SOLO Jefe:
+ * es el unico endpoint por el que viajan los correos del equipo. Nunca
+ * devuelve token. Las cuentas con hora/saldo salen de tablaSaldos() y
+ * _liquidacionMes(); el cliente no calcula plata.
+ *
+ * @param {string} idOrigen ID del canje (CP-...) desde el que se abre.
+ */
+function apiMailCanje(idOrigen) {
+  const yo = _identificar(['Jefe']);
+
+  const id = String(idOrigen || '').trim();
+  if (id.indexOf('CP-') !== 0) throw new Error('Solo se arma el mail de un canje (ID CP-...).');
+
+  const canjes = _leerCanjes();
+  const origen = canjes.filter(function (c) { return c.id === id; })[0];
+  if (!origen) throw new Error('No se encontro el canje ' + id + '.');
+  if (origen.estado !== 'Aprobada') {
+    throw new Error('Solo se arma el mail de un canje aprobado (estado: ' + origen.estado + ').');
+  }
+  const origenClave = _clavePartes(origen.partes);
+  if (!origenClave) throw new Error('El canje ' + id + ' no tiene una fecha legible.');
+
+  const hoy = _hoyPartes();
+  const minNum = Math.min(_numPartes(hoy), _numPartes(origen.partes));
+  const lista = canjes
+    .filter(function (c) {
+      return c.email === origen.email && c.estado === 'Aprobada' && c.partes &&
+             _numPartes(c.partes) >= minNum;
+    })
+    .map(function (c) {
+      return { id: c.id, fechaClave: _clavePartes(c.partes), horas: c.horas,
+               tipoCanje: c.tipo, origen: c.id === origen.id };
+    })
+    .sort(function (a, b) {
+      if (a.fechaClave !== b.fechaClave) return a.fechaClave < b.fechaClave ? -1 : 1;
+      return a.id < b.id ? -1 : (a.id > b.id ? 1 : 0);
+    });
+
+  // Una sola llamada a tablaSaldos() para el saldo del dueño y el del resto.
+  const saldos = tablaSaldos();
+  const miSaldo = saldos[origen.email];
+  const saldoDe = function (email) {
+    const s = saldos[email];
+    return s ? s.generadas - s.compensadas : 0;
+  };
+
+  const directorio = _directorio();
+  const supervisores = directorio.filter(function (p) { return p.rol === 'Supervisor'; });
+  const resto = supervisores
+    .filter(function (p) { return p.email !== origen.email; })
+    .map(function (p) { return { nombre: p.nombre, saldo: saldoDe(p.email) }; })
+    .sort(function (a, b) { return a.nombre.localeCompare(b.nombre, 'es'); });
+
+  const liq = _liquidacionMes(hoy.anio, hoy.mes);
+  const liqFilas = Object.keys(liq.porEmail)
+    .map(function (e) { return { nombre: liq.porEmail[e].nombre, horas: liq.porEmail[e].total }; })
+    .filter(function (f) { return f.horas > 0; })
+    .sort(function (a, b) { return a.nombre.localeCompare(b.nombre, 'es'); });
+
+  const sinPlaceholder = function (p) { return !_esEmailPlaceholder(p.email); };
+
+  return {
+    origen: { id: origen.id, fechaClave: origenClave },
+    supervisor: { nombre: _mapaNombres()[origen.email] || origen.supervisor },
+    hoyClave: _clavePartes(hoy),
+    canjes: lista,
+    saldoActual: miSaldo ? miSaldo.generadas - miSaldo.compensadas : 0,
+    resto: resto,
+    liqMes: { anio: hoy.anio, mes: hoy.mes, mesNombre: _MESES_MIN[hoy.mes - 1],
+              filas: liqFilas, total: liq.total.total },
+    feriados: Object.keys(_feriadosMap()),
+    para: directorio.filter(function (p) { return p.rol === 'Personas'; })
+                    .filter(sinPlaceholder).map(function (p) { return p.email; }),
+    cc: supervisores.filter(sinPlaceholder).map(function (p) { return p.email; }),
+    yoEmail: yo.email,
+    firma: { nombre: yo.nombre, cargo: CONFIG.FIRMA_CARGO }
+  };
 }
 
 // ==================== AUXILIARES ====================

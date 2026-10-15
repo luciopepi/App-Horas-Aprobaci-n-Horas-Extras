@@ -11,6 +11,7 @@
     chevronRight: '<path d="m9 6 6 6-6 6"/>',
     calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/>',
     alertTriangle: '<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
+    mail: '<rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>',
     banknote: '<rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2"/><path d="M6 12h.01M18 12h.01"/>'
   };
   function svgIcon(nombre, clase) {
@@ -51,6 +52,145 @@
     _escDiv.textContent = valor == null ? '' : String(valor);
     return _escDiv.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
+
+  /* ==================== MAIL DE CANJE: FUNCIONES PURAS ==================== */
+  // Sin DOM ni servidor: se prueban solas en node (el harness extrae este
+  // bloque por los marcadores). Toda fecha se maneja en UTC (Date.UTC +
+  // getUTC*): nunca getDay() sobre una fecha local. Las reglas de plata
+  // (saldos, horas a liquidar) llegan ya calculadas por apiMailCanje.
+  /* >>> MAIL_CANJE_PURO */
+  var DS_LARGO = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+  var MS_MIN = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto',
+    'septiembre', 'octubre', 'noviembre', 'diciembre'];
+
+  function fechaUTC(clave) {
+    var p = String(clave).split('-');
+    return new Date(Date.UTC(Number(p[0]), Number(p[1]) - 1, Number(p[2])));
+  }
+  function claveUTC(d) { return d.toISOString().slice(0, 10); }
+  // ferSet: objeto {'yyyy-MM-dd': true}.
+  function esHabil(d, ferSet) {
+    var w = d.getUTCDay();
+    return w !== 0 && w !== 6 && !ferSet[claveUTC(d)];
+  }
+  function sigHabil(d, ferSet) {
+    var y = new Date(d.getTime());
+    do { y.setUTCDate(y.getUTCDate() + 1); } while (!esHabil(y, ferSet));
+    return y;
+  }
+  function largo(d) { return DS_LARGO[d.getUTCDay()] + ' ' + d.getUTCDate() + ' de ' + MS_MIN[d.getUTCMonth()]; }
+  function corto(d) { return DS_LARGO[d.getUTCDay()] + ' ' + d.getUTCDate(); }
+
+  // b sigue a a: mismo dia (dos medios dias) o el siguiente dia habil.
+  function sigueA(claveA, claveB, ferSet) {
+    return claveB === claveA || claveB === claveUTC(sigHabil(fechaUTC(claveA), ferSet));
+  }
+
+  // Marca el canje de origen y los que lo siguen de corrido (hacia adelante
+  // y hacia atras), asi da igual desde que dia del bloque se abra el mail.
+  // canjes: ordenados asc por fecha. Devuelve un arreglo de booleanos.
+  function preTildar(canjes, ferSet) {
+    var on = canjes.map(function () { return false; });
+    var i0 = -1;
+    canjes.forEach(function (c, i) { if (i0 < 0 && c.origen) i0 = i; });
+    if (i0 < 0) return on;
+    on[i0] = true;
+    var i;
+    for (i = i0 + 1; i < canjes.length; i++) {
+      if (!sigueA(canjes[i - 1].fechaClave, canjes[i].fechaClave, ferSet)) break;
+      on[i] = true;
+    }
+    for (i = i0 - 1; i >= 0; i--) {
+      if (!sigueA(canjes[i].fechaClave, canjes[i + 1].fechaClave, ferSet)) break;
+      on[i] = true;
+    }
+    return on;
+  }
+
+  // sel: canjes elegidos (asc por fecha). Junta los dias habiles seguidos:
+  // "del jueves 15 al lunes 19 de octubre", "el martes 27 de octubre".
+  function rangos(sel, ferSet) {
+    var out = [], ini = null, prev = null;
+    sel.forEach(function (c) {
+      var x = fechaUTC(c.fechaClave);
+      if (ini) {
+        if (c.fechaClave === claveUTC(prev)) return; // dos medios dias el mismo dia
+        if (claveUTC(sigHabil(prev, ferSet)) === c.fechaClave) { prev = x; return; }
+        out.push([ini, prev]);
+      }
+      ini = x; prev = x;
+    });
+    if (ini) out.push([ini, prev]);
+    return out.map(function (r) {
+      return claveUTC(r[0]) === claveUTC(r[1]) ? 'el ' + largo(r[0])
+        : 'del ' + corto(r[0]) + ' al ' + largo(r[1]);
+    });
+  }
+  function unir(a) {
+    return a.length > 1 ? a.slice(0, -1).join(', ') + ' y ' + a[a.length - 1] : (a[0] || '');
+  }
+
+  // d: respuesta de apiMailCanje. seleccion: arreglo de booleanos paralelo a
+  // d.canjes. opciones: {detalle, saldo, resto, liq}.
+  function armarMailCanje(d, seleccion, opciones) {
+    var ferSet = {};
+    (d.feriados || []).forEach(function (f) { ferSet[f] = true; });
+    var sel = d.canjes.filter(function (c, i) { return seleccion[i]; });
+    var sup = d.supervisor.nombre;
+    var L = ['Hola,', ''];
+    var asunto, nDias = 0;
+
+    if (!sel.length) {
+      L.push('(Tildá al menos un día.)');
+      asunto = 'Canje de horas extra — ' + sup + ' — sin días';
+    } else {
+      var horas = 0, vistos = {};
+      sel.forEach(function (c) { horas += c.horas; if (!vistos[c.fechaClave]) { vistos[c.fechaClave] = true; nDias++; } });
+      var primera = fechaUTC(sel[0].fechaClave);
+      var ultima = fechaUTC(sel[sel.length - 1].fechaClave);
+
+      if (opciones.detalle) {
+        L.push('Les informo que ' + sup + ' se toma ' + unir(rangos(sel, ferSet)) +
+          ', a cuenta de su saldo de horas extra (' + fmtCorto(horas) + ' hs).');
+        L.push('Se reintegra el ' + largo(sigHabil(ultima, ferSet)) + '.', '');
+      }
+      if (opciones.saldo) {
+        L.push('Saldo de canje que le queda: ' + fmtCorto(d.saldoActual) + ' hs.', '');
+      }
+      if (opciones.resto) {
+        if (d.resto.length) {
+          L.push('Saldo de canje del resto del equipo:');
+          d.resto.forEach(function (r) { L.push('  • ' + r.nombre + ': ' + fmtCorto(r.saldo) + ' hs'); });
+        } else {
+          L.push('Saldo de canje del resto del equipo: no hay otros supervisores activos.');
+        }
+        L.push('');
+      }
+      if (opciones.liq) {
+        var mes = d.liqMes.mesNombre;
+        if (d.liqMes.filas.length) {
+          L.push('Horas a liquidar de ' + mes + ' (sábados, domingos y feriados):');
+          d.liqMes.filas.forEach(function (r) { L.push('  • ' + r.nombre + ': ' + fmtCorto(r.horas) + ' hs'); });
+          L.push('  Total: ' + fmtCorto(d.liqMes.total) + ' hs');
+        } else {
+          L.push('Horas a liquidar de ' + mes + ': sin horas liquidables.');
+        }
+        L.push('');
+      }
+      asunto = 'Canje de horas extra — ' + sup + ' — ' + (nDias === 1 ? '1 día' : nDias + ' días') +
+        ' desde ' + corto(primera) + '/' + (primera.getUTCMonth() + 1);
+    }
+    L.push('Saludos,', d.firma.nombre, d.firma.cargo);
+    return { asunto: asunto, texto: L.join('\n'), nDias: nDias };
+  }
+
+  function urlGmail(d, asunto, texto) {
+    var enc = encodeURIComponent;
+    return 'https://mail.google.com/mail/?authuser=' + enc(d.yoEmail) + '&view=cm&fs=1&to=' + enc(d.para.join(',')) +
+      '&cc=' + enc(d.cc.join(',')) + '&su=' + enc(asunto) + '&body=' + enc(texto);
+  }
+  var MAIL_URL_MAX = 2000;
+  /* <<< MAIL_CANJE_PURO */
 
   /* ==================== LLAMADAS AL SERVIDOR ==================== */
   // Todas pasan por withFailureHandler: ningun boton se queda "colgado"
@@ -981,6 +1121,185 @@
   var calJefe = crearCalendario('calJefe');
   var calPersonas = crearCalendario('calPersonas');
 
+  /* ==================== MODAL: MAIL DE CANJE (solo Jefe) ==================== */
+  // El servidor (apiMailCanje, solo Jefe) arma los datos; aca solo se tildan
+  // dias y se arma el texto con las funciones puras de arriba. El mail lo
+  // manda el Jefe desde su Gmail: la app nunca envia nada.
+  var overlayMailCanje = document.getElementById('overlayMailCanje');
+  var mailCanjeSub = document.getElementById('mailCanjeSub');
+  var mailCanjeCargando = document.getElementById('mailCanjeCargando');
+  var mailCanjeError = document.getElementById('mailCanjeError');
+  var mailCanjeContenido = document.getElementById('mailCanjeContenido');
+  var mailCanjeDias = document.getElementById('mailCanjeDias');
+  var mailCanjeAsunto = document.getElementById('mailCanjeAsunto');
+  var mailCanjePrev = document.getElementById('mailCanjePrev');
+  var mailCanjeAvisoLargo = document.getElementById('mailCanjeAvisoLargo');
+  var mailCanjeAvisoPara = document.getElementById('mailCanjeAvisoPara');
+  var mailCanjeAvisoCopia = document.getElementById('mailCanjeAvisoCopia');
+  var mailCanjeCopiar = document.getElementById('mailCanjeCopiar');
+  var mailCanjeGmail = document.getElementById('mailCanjeGmail');
+  var mailCanjeStatus = document.getElementById('mailCanjeStatus');
+  var mcOpciones = {
+    detalle: document.getElementById('mcDetalle'), saldo: document.getElementById('mcSaldo'),
+    resto: document.getElementById('mcResto'), liq: document.getElementById('mcLiq')
+  };
+  var mailCanje = { datos: null, seleccion: [], texto: '', pedido: 0, timerCopiar: null };
+
+  function mailCanjeIcono(nombre) { return svgIcon(nombre, 'icon-16'); }
+
+  function mailCanjeAviso(el, mensaje) {
+    el.innerHTML = mailCanjeIcono('alertTriangle') + '<span>' + esc(mensaje) + '</span>';
+    el.hidden = false;
+  }
+
+  function mailCanjeOpcionesActuales() {
+    return { detalle: mcOpciones.detalle.checked, saldo: mcOpciones.saldo.checked,
+             resto: mcOpciones.resto.checked, liq: mcOpciones.liq.checked };
+  }
+
+  // Cada cambio de casilla rearma asunto, texto y enlace.
+  function mailCanjeRearmar() {
+    var d = mailCanje.datos;
+    if (!d) return;
+    var r = armarMailCanje(d, mailCanje.seleccion, mailCanjeOpcionesActuales());
+    mailCanje.texto = r.texto;
+    mailCanjeAsunto.textContent = 'Asunto: ' + r.asunto;
+    mailCanjePrev.textContent = r.texto;
+
+    var url = urlGmail(d, r.asunto, r.texto);
+    if (url.length > MAIL_URL_MAX) {
+      mailCanjeAviso(mailCanjeAvisoLargo, 'El mail es muy largo para abrirlo directo en Gmail (' + url.length +
+        ' caracteres). Usá Copiar y pegalo en un mail nuevo.');
+      mailCanjeGmail.removeAttribute('href');
+      mailCanjeGmail.setAttribute('aria-disabled', 'true');
+    } else {
+      mailCanjeAvisoLargo.hidden = true;
+      mailCanjeGmail.setAttribute('href', url);
+      mailCanjeGmail.removeAttribute('aria-disabled');
+    }
+  }
+
+  function mailCanjeMostrar(d) {
+    var f = fechaUTC(d.origen.fechaClave);
+    mailCanjeSub.textContent = d.supervisor.nombre + ' · ' + DS_CORTO[f.getUTCDay()] + ' ' +
+      f.getUTCDate() + '/' + (f.getUTCMonth() + 1);
+    var ferSet = {};
+    (d.feriados || []).forEach(function (x) { ferSet[x] = true; });
+    mailCanje.datos = d;
+    mailCanje.seleccion = preTildar(d.canjes, ferSet);
+
+    mailCanjeDias.innerHTML = d.canjes.map(function (c, i) {
+      var x = fechaUTC(c.fechaClave);
+      var texto = largo(x);
+      texto = texto.charAt(0).toUpperCase() + texto.slice(1);
+      return '<label class="chk"><input type="checkbox" data-i="' + i + '"' +
+        (mailCanje.seleccion[i] ? ' checked' : '') + '><span class="dia">' + esc(texto) + ' · ' + esc(fmtCorto(c.horas)) + ' hs' +
+        (c.origen ? '<span class="tag origen">origen</span>' : '') +
+        (c.tipoCanje !== 'Dia completo' ? '<span class="tag">' + esc(c.tipoCanje) + '</span>' : '') +
+        '</span></label>';
+    }).join('');
+
+    mcOpciones.detalle.checked = true;
+    mcOpciones.saldo.checked = true;
+    mcOpciones.resto.checked = false;
+    mcOpciones.liq.checked = false;
+    document.getElementById('mcLiqSub').textContent = 'Sábados, domingos y feriados de ' + d.liqMes.mesNombre;
+    document.getElementById('mailCanjePillPara').textContent = 'Gerencia de Personas (' + d.para.length + ')';
+    document.getElementById('mailCanjePillCc').textContent = 'Supervisores (' + d.cc.length + ')';
+    if (d.para.length) mailCanjeAvisoPara.hidden = true;
+    else mailCanjeAviso(mailCanjeAvisoPara, 'No hay nadie con rol Personas activo en la hoja Correos.');
+
+    mailCanjeContenido.hidden = false;
+    mailCanjeRearmar();
+  }
+
+  async function abrirMailCanje(id) {
+    var pedido = ++mailCanje.pedido;
+    mailCanje.datos = null;
+    mailCanje.seleccion = [];
+    mailCanje.texto = '';
+    mailCanjeSub.textContent = '';
+    mailCanjeContenido.hidden = true;
+    mailCanjeError.hidden = true;
+    mailCanjeAvisoLargo.hidden = true;
+    mailCanjeAvisoCopia.hidden = true;
+    mailCanjeStatus.textContent = '';
+    mailCanjeCargando.hidden = false;
+    abrirModal(overlayMailCanje);
+    try {
+      var d = await llamarServidor('apiMailCanje', id);
+      if (pedido !== mailCanje.pedido) return; // se cerro o se abrio otro mientras tanto
+      mailCanjeCargando.hidden = true;
+      mailCanjeMostrar(d);
+    } catch (err) {
+      if (pedido !== mailCanje.pedido) return;
+      mailCanjeCargando.hidden = true;
+      mailCanjeError.textContent = err.message || 'No se pudo armar el mail.';
+      mailCanjeError.hidden = false;
+    }
+  }
+
+  mailCanjeDias.addEventListener('change', function (ev) {
+    var i = ev.target && ev.target.getAttribute ? ev.target.getAttribute('data-i') : null;
+    if (i === null || i === undefined) return;
+    mailCanje.seleccion[Number(i)] = !!ev.target.checked;
+    mailCanjeRearmar();
+  });
+  Object.keys(mcOpciones).forEach(function (k) {
+    mcOpciones[k].addEventListener('change', mailCanjeRearmar);
+  });
+  mailCanjeGmail.addEventListener('click', function (ev) {
+    if (mailCanjeGmail.getAttribute('aria-disabled') === 'true') ev.preventDefault();
+  });
+
+  // Patron Hockey App: clipboard API y, si falla (en el iframe de Apps Script
+  // suele fallar), textarea + execCommand. El textarea va en document.body y
+  // NO en appContainer (esta inert con el modal abierto); se crea, usa y saca
+  // en el mismo gesto.
+  function copiarTexto(texto, boton, alTerminar) {
+    function viaTextarea() {
+      var ta = document.createElement('textarea');
+      ta.value = texto;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.top = '0';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      var ok = false;
+      try { ta.focus(); ta.select(); ok = document.execCommand('copy'); } catch (e) { ok = false; }
+      document.body.removeChild(ta);
+      if (boton && typeof boton.focus === 'function') boton.focus();
+      return ok;
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(texto).then(
+        function () { alTerminar(true); },
+        function () { alTerminar(viaTextarea()); }
+      );
+    } else {
+      alTerminar(viaTextarea());
+    }
+  }
+
+  mailCanjeCopiar.addEventListener('click', function () {
+    if (!mailCanje.texto) return;
+    copiarTexto(mailCanje.texto, mailCanjeCopiar, function (ok) {
+      clearTimeout(mailCanje.timerCopiar);
+      if (ok) {
+        mailCanjeAvisoCopia.hidden = true;
+        mailCanjeCopiar.textContent = 'Copiado';
+        mailCanjeStatus.textContent = 'Texto copiado';
+        mailCanje.timerCopiar = setTimeout(function () {
+          mailCanjeCopiar.textContent = 'Copiar';
+          mailCanjeStatus.textContent = '';
+        }, 1500);
+      } else {
+        mailCanjeAviso(mailCanjeAvisoCopia, 'No se pudo copiar: seleccioná el texto de la vista previa.');
+        mailCanjeStatus.textContent = 'No se pudo copiar';
+      }
+    });
+  });
+
   /* ==================== PANEL CONSULTA (Jefe / Personas) ==================== */
   // Un panel de consulta por vista (Jefe/Personas). apiConsulta() ya
   // devuelve solo las filas que el rol de quien pregunta puede ver
@@ -1325,13 +1644,20 @@
         if (f.fecha) meta.push('S' + isoSemana(f.fecha.anio, f.fecha.mes, f.fecha.dia).semana);
         meta.push(f.supervisor);
         if (f.mov === 'CP') {
-          return '<li class="solicitud-item" style="--i:' + i + '">' +
+          // Solo el Jefe arma el mail, y solo de un canje aprobado.
+          var conMail = f.estado === 'Aprobada' && estadoActual && estadoActual.yo && estadoActual.yo.rol === 'Jefe';
+          return '<li class="solicitud-item' + (conMail ? ' con-acciones' : '') + '" style="--i:' + i + '">' +
             '<div class="sol-main">' +
               '<span class="sol-tipo is-canje">Canje</span>' +
               '<div class="sol-info"><strong>' + esc(fmt(f.horas) + ' hs · Canje · ' + (f.tipoCanje || '')) + '</strong>' +
               '<span class="sol-meta">' + esc(meta.join(' · ')) + '</span></div>' +
             '</div>' +
             '<span class="chip ' + info.clase + '">' + svgIcon(info.icono, 'icon-14') + info.texto + '</span>' +
+            (conMail
+              ? '<div class="sol-acciones"><button type="button" class="btn btn-ghost btn-sm" data-accion="mail-canje" data-id="' +
+                esc(f.id) + '" aria-label="' + esc('Mail de canje ' + f.supervisor + ' ' + (f.fechaTexto || '')) + '">' +
+                svgIcon('mail', 'icon-16') + 'Mail de canje</button></div>'
+              : '') +
             '</li>';
         }
         if (f.tipoDia) meta.push(f.tipoDia);
@@ -1405,6 +1731,11 @@
     elEstado.addEventListener('change', function () { filtros.estado = elEstado.value; aplicarFiltros(); });
     elLinea.addEventListener('change', function () { filtros.linea = elLinea.value; aplicarFiltros(); });
     elTipoDia.addEventListener('change', function () { filtros.tipoDia = elTipoDia.value; aplicarFiltros(); });
+    // Delegacion: la lista se re-renderiza entera con cada filtro.
+    elLista.addEventListener('click', function (ev) {
+      var t = ev.target && ev.target.closest ? ev.target.closest('[data-accion="mail-canje"]') : null;
+      if (t) abrirMailCanje(t.getAttribute('data-id'));
+    });
     elLimpiar.addEventListener('click', function () {
       filtros.supervisor = 'Todos';
       filtros.mesValor = claveHoy;

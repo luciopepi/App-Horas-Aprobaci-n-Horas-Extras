@@ -495,6 +495,60 @@
     </div>
   </div>
 
+  <!-- ==================== MODAL: MAIL DE CANJE (solo Jefe) ==================== -->
+  <div class="modal-overlay" id="overlayMailCanje" aria-hidden="true">
+    <div class="modal surface modal-ancho" role="dialog" aria-modal="true" aria-labelledby="tituloMailCanje">
+      <div class="modal-header">
+        <div>
+          <div class="eyebrow">Canje aprobado</div>
+          <h2 class="h3" id="tituloMailCanje">Mail de canje</h2>
+          <p class="caption" id="mailCanjeSub"></p>
+        </div>
+        <button type="button" class="modal-close" data-close aria-label="Cerrar">
+          <svg class="icon icon-16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+      </div>
+      <div class="cal-skeleton" id="mailCanjeCargando" hidden>
+        <div class="sk-line" style="width:55%;height:11px"></div>
+        <div class="sk-line" style="width:100%;height:120px"></div>
+        <div class="sk-line" style="width:100%;height:80px"></div>
+      </div>
+      <div class="error-msg" id="mailCanjeError" role="alert" hidden></div>
+      <div class="mail-body" id="mailCanjeContenido" hidden>
+        <section class="mail-seccion">
+          <h3 class="mail-h">Días que entran</h3>
+          <div id="mailCanjeDias"></div>
+          <p class="caption mail-ayuda">Tildé el canje de origen y los días hábiles seguidos. El fin de semana no corta: viernes y lunes cuentan como seguidos.</p>
+        </section>
+        <section class="mail-seccion">
+          <h3 class="mail-h">Qué incluir</h3>
+          <label class="chk"><input type="checkbox" id="mcDetalle" checked><span>Detalle del canje<span class="chk-sub">Días, horas y fecha de reintegro</span></span></label>
+          <label class="chk"><input type="checkbox" id="mcSaldo" checked><span>Saldo que le queda</span></label>
+          <label class="chk"><input type="checkbox" id="mcResto"><span>Saldos del resto<span class="chk-sub">Cuánto tiene para canjear cada supervisor</span></span></label>
+          <label class="chk"><input type="checkbox" id="mcLiq"><span>Horas a liquidar del mes<span class="chk-sub" id="mcLiqSub">Sábados, domingos y feriados del mes</span></span></label>
+        </section>
+        <section class="mail-seccion">
+          <h3 class="mail-h">Vista previa</h3>
+          <div class="mail-dest">
+            <b>Para</b><span class="pill" id="mailCanjePillPara"></span>
+            <b>CC</b><span class="pill" id="mailCanjePillCc"></span>
+          </div>
+          <p class="mail-asunto" id="mailCanjeAsunto"></p>
+          <div class="mail-prev" id="mailCanjePrev"></div>
+          <p class="con-aviso-sinfecha" id="mailCanjeAvisoLargo" hidden></p>
+          <p class="con-aviso-sinfecha" id="mailCanjeAvisoPara" hidden></p>
+          <p class="con-aviso-sinfecha" id="mailCanjeAvisoCopia" hidden></p>
+          <div class="mail-btns">
+            <button type="button" class="btn btn-ghost" id="mailCanjeCopiar">Copiar</button>
+            <a class="btn btn-primary" id="mailCanjeGmail" target="_blank" rel="noopener">Abrir en Gmail</a>
+          </div>
+          <p class="caption mail-ayuda">"Abrir en Gmail" abre un mail nuevo con destinatarios, asunto y texto listos. Lo revisás, cambiás lo que quieras y lo mandás vos.</p>
+          <span class="visually-hidden" aria-live="polite" id="mailCanjeStatus"></span>
+        </section>
+      </div>
+    </div>
+  </div>
+
   <!-- ==================== EXITO ==================== -->
   <div class="modal-overlay success-overlay" id="overlaySuccess" aria-hidden="true">
     <div class="success-panel surface">

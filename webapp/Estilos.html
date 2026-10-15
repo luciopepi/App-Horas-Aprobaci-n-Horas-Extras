@@ -1179,6 +1179,46 @@
     overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap;
   }
 
+  /* ==================== MAIL DE CANJE (modal del Jefe) ==================== */
+  /* El cuerpo es .mail-body y NO .modal-body: la regla ".modal-body label"
+     (mayusculas, columna) romperia los label.chk de las casillas. */
+  .mail-body { display: flex; flex-direction: column; gap: 12px; }
+  .mail-seccion { border: 1px solid var(--border); border-radius: var(--radius-card); padding: 12px; }
+  .mail-h { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .12em; color: var(--muted); margin-bottom: 8px; }
+  label.chk {
+    display: flex; align-items: flex-start; gap: 10px; padding: 9px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 13.5px; min-height: 44px; cursor: pointer; color: var(--text);
+  }
+  label.chk:last-child { border-bottom: 0; }
+  /* accent-color con --focus-ring y no con wine: el wine sobre --card oscuro
+     da ~1,6:1 y la casilla tildada no se distingue. */
+  label.chk input { width: 18px; height: 18px; margin-top: 2px; accent-color: var(--focus-ring); flex-shrink: 0; }
+  .chk-sub { display: block; font-size: 11.5px; color: var(--muted); }
+  .mail-body .dia { font-variant-numeric: tabular-nums; }
+  .tag {
+    font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 5px;
+    border: 1px solid var(--border); color: var(--olive-text);
+    margin-left: 6px; white-space: nowrap;
+  }
+  .tag.origen { color: var(--amber-text); }
+  .mail-dest { display: flex; flex-wrap: wrap; gap: 6px; font-size: 12px; margin-bottom: 10px; }
+  .mail-dest b { width: 100%; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+  .pill { background: var(--card2); border: 1px solid var(--border); border-radius: 999px; padding: 3px 10px; }
+  .mail-asunto { font-size: 13px; font-weight: 700; margin-bottom: 10px; overflow-wrap: anywhere; }
+  .mail-prev {
+    white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12.5px; line-height: 1.55;
+    background: var(--card2); border: 1px solid var(--border);
+    border-radius: var(--radius-input); padding: 12px; max-height: 340px; overflow: auto;
+    font-variant-numeric: tabular-nums;
+  }
+  .mail-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
+  .mail-btns .btn { text-decoration: none; }
+  a.btn[aria-disabled="true"] { opacity: .45; cursor: not-allowed; }
+  .mail-ayuda { margin-top: 10px; }
+  .sol-acciones { flex-basis: 100%; display: flex; gap: 8px; justify-content: flex-end; }
+  .solicitud-item.con-acciones { flex-wrap: wrap; }
+
   /* ==================== REDUCED MOTION ==================== */
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after {

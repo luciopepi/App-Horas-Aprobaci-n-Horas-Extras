@@ -2198,6 +2198,9 @@ function _liquidacionMes(anio, mes) {
     porEmail: {},
     total: { sabDom: 0, feriado: 0, total: 0 },
     pendientesHE: { cant: 0, horas: 0 },
+    // Pendientes que, si se aprueban, se liquidan (sab/dom/feriado). Sirve para
+    // aclarar que el total "a liquidar" es parcial mientras haya cosas por aprobar.
+    pendientesLiq: { cant: 0, horas: 0 },
     sinFecha: 0
   };
   const d = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SH.SOL).getDataRange().getValues();
@@ -2218,6 +2221,10 @@ function _liquidacionMes(anio, mes) {
       if (partes && partes.anio === anio && partes.mes === mes) {
         out.pendientesHE.cant++;
         out.pendientesHE.horas += horas;
+        if (circuitoHE(d[i][cFecha]).circuito === 'LIQ') {
+          out.pendientesLiq.cant++;
+          out.pendientesLiq.horas += horas;
+        }
       }
       continue;
     }
@@ -2314,7 +2321,12 @@ function apiMailCanje(idOrigen) {
     saldoActual: miSaldo ? miSaldo.generadas - miSaldo.compensadas : 0,
     resto: resto,
     liqMes: { anio: hoy.anio, mes: hoy.mes, mesNombre: _MESES_MIN[hoy.mes - 1],
-              filas: liqFilas, total: liq.total.total },
+              filas: liqFilas, total: liq.total.total,
+              // El total es parcial: lo aprobado hasta hoy. El mail lo aclara para
+              // que Personas no lo tome como cierre del mes.
+              alDia: Utilities.formatDate(new Date(), CONFIG.TZ, 'dd/MM'),
+              pendientesHoras: liq.pendientesLiq.horas },
+    horasPorDia: CONFIG.HORAS_POR_DIA,
     feriados: Object.keys(_feriadosMap()),
     para: directorio.filter(function (p) { return p.rol === 'Personas'; })
                     .filter(sinPlaceholder).map(function (p) { return p.email; }),

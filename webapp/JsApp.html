@@ -123,7 +123,10 @@
     if (ini) out.push([ini, prev]);
     return out.map(function (r) {
       return claveUTC(r[0]) === claveUTC(r[1]) ? 'el ' + largo(r[0])
-        : 'del ' + corto(r[0]) + ' al ' + largo(r[1]);
+        // Si el rango cruza de mes, los dos meses completos: "del viernes 30 al
+        // lunes 2 de noviembre" hace leer el 30 como de noviembre.
+        : 'del ' + (r[0].getUTCMonth() !== r[1].getUTCMonth() ? largo(r[0]) : corto(r[0])) +
+          ' al ' + largo(r[1]);
     });
   }
   function unir(a) {
@@ -150,9 +153,19 @@
       var ultima = fechaUTC(sel[sel.length - 1].fechaClave);
 
       if (opciones.detalle) {
-        L.push('Les informo que ' + sup + ' se toma ' + unir(rangos(sel, ferSet)) +
+        // Si el ultimo dia es parcial (medio dia), la persona vuelve ese mismo dia
+        // para la otra mitad de la jornada: decir "el dia siguiente" le informaria
+        // a Personas una ausencia mas larga que la real.
+        var claveUlt = sel[sel.length - 1].fechaClave, horasUlt = 0;
+        sel.forEach(function (c) { if (c.fechaClave === claveUlt) horasUlt += c.horas; });
+        var parcial = horasUlt < (d.horasPorDia || 8);
+        var rs = rangos(sel, ferSet);
+        if (parcial) rs[rs.length - 1] += ' (medio día)';
+        L.push('Les informo que ' + sup + ' se toma ' + unir(rs) +
           ', a cuenta de su saldo de horas extra (' + fmtCorto(horas) + ' hs).');
-        L.push('Se reintegra el ' + largo(sigHabil(ultima, ferSet)) + '.', '');
+        L.push(parcial
+          ? 'Se reintegra el mismo ' + largo(ultima) + ', para la otra mitad de la jornada.'
+          : 'Se reintegra el ' + largo(sigHabil(ultima, ferSet)) + '.', '');
       }
       if (opciones.saldo) {
         L.push('Saldo de canje que le queda: ' + fmtCorto(d.saldoActual) + ' hs.', '');
@@ -168,12 +181,17 @@
       }
       if (opciones.liq) {
         var mes = d.liqMes.mesNombre;
+        // Es un total parcial (aprobado hasta hoy), no el cierre del mes.
+        var alDia = d.liqMes.alDia ? ', aprobadas al ' + d.liqMes.alDia : '';
         if (d.liqMes.filas.length) {
-          L.push('Horas a liquidar de ' + mes + ' (sábados, domingos y feriados):');
+          L.push('Horas a liquidar de ' + mes + ' (sábados, domingos y feriados' + alDia + '):');
           d.liqMes.filas.forEach(function (r) { L.push('  • ' + r.nombre + ': ' + fmtCorto(r.horas) + ' hs'); });
           L.push('  Total: ' + fmtCorto(d.liqMes.total) + ' hs');
         } else {
-          L.push('Horas a liquidar de ' + mes + ': sin horas liquidables.');
+          L.push('Horas a liquidar de ' + mes + (alDia ? ' (' + alDia.slice(2) + ')' : '') + ': sin horas liquidables.');
+        }
+        if (d.liqMes.pendientesHoras > 0) {
+          L.push('  + ' + fmtCorto(d.liqMes.pendientesHoras) + ' hs pendientes de aprobar');
         }
         L.push('');
       }
@@ -614,6 +632,9 @@
     overlay.addEventListener('keydown', overlay._trapHandler);
   }
   function cerrarModal(overlay) {
+    // Cerrar el mail de canje mientras carga invalida esa respuesta: si no,
+    // llegaria despues y llenaria un modal ya cerrado.
+    if (overlay.id === 'overlayMailCanje' && typeof mailCanje !== 'undefined' && mailCanje) mailCanje.pedido++;
     overlay.classList.remove('open');
     overlay.setAttribute('aria-hidden', 'true');
     if (overlay._trapHandler) {
@@ -1170,12 +1191,20 @@
     if (url.length > MAIL_URL_MAX) {
       mailCanjeAviso(mailCanjeAvisoLargo, 'El mail es muy largo para abrirlo directo en Gmail (' + url.length +
         ' caracteres). Usá Copiar y pegalo en un mail nuevo.');
+      // Sin href (asi no abre un mail cortado), pero sigue enfocable y anuncia
+      // por que esta bloqueado.
       mailCanjeGmail.removeAttribute('href');
       mailCanjeGmail.setAttribute('aria-disabled', 'true');
+      mailCanjeGmail.setAttribute('role', 'link');
+      mailCanjeGmail.setAttribute('tabindex', '0');
+      mailCanjeGmail.setAttribute('aria-describedby', 'mailCanjeAvisoLargo');
     } else {
       mailCanjeAvisoLargo.hidden = true;
       mailCanjeGmail.setAttribute('href', url);
       mailCanjeGmail.removeAttribute('aria-disabled');
+      mailCanjeGmail.removeAttribute('role');
+      mailCanjeGmail.removeAttribute('tabindex');
+      mailCanjeGmail.removeAttribute('aria-describedby');
     }
   }
 
@@ -1252,32 +1281,38 @@
     if (mailCanjeGmail.getAttribute('aria-disabled') === 'true') ev.preventDefault();
   });
 
-  // Patron Hockey App: clipboard API y, si falla (en el iframe de Apps Script
-  // suele fallar), textarea + execCommand. El textarea va en document.body y
+  // Copiado: primero textarea + execCommand, SINCRONICO y dentro del gesto del
+  // usuario (en el iframe de Apps Script la API de portapapeles suele estar
+  // bloqueada, y si se intenta despues de que falle, el gesto ya se perdio).
+  // La API queda de respaldo. El textarea va sin readonly y con letra de 16px:
+  // asi iOS deja seleccionarlo y no hace zoom. Va en document.body y
   // NO en appContainer (esta inert con el modal abierto); se crea, usa y saca
   // en el mismo gesto.
   function copiarTexto(texto, boton, alTerminar) {
     function viaTextarea() {
       var ta = document.createElement('textarea');
       ta.value = texto;
-      ta.setAttribute('readonly', '');
-      ta.style.position = 'fixed';
-      ta.style.top = '0';
-      ta.style.opacity = '0';
+      ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0;font-size:16px';
       document.body.appendChild(ta);
       var ok = false;
-      try { ta.focus(); ta.select(); ok = document.execCommand('copy'); } catch (e) { ok = false; }
+      try {
+        ta.focus({ preventScroll: true });
+        ta.select();
+        if (typeof ta.setSelectionRange === 'function') ta.setSelectionRange(0, texto.length);
+        ok = document.execCommand('copy');
+      } catch (e) { ok = false; }
       document.body.removeChild(ta);
       if (boton && typeof boton.focus === 'function') boton.focus();
       return ok;
     }
+    if (viaTextarea()) { alTerminar(true); return; }
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(texto).then(
         function () { alTerminar(true); },
-        function () { alTerminar(viaTextarea()); }
+        function () { alTerminar(false); }
       );
     } else {
-      alTerminar(viaTextarea());
+      alTerminar(false);
     }
   }
 

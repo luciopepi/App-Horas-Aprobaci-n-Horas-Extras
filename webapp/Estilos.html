@@ -1004,6 +1004,7 @@
   .modal-body input[type="text"],
   .modal-body input[type="date"],
   .modal-body input[type="number"],
+  .modal-body input[type="email"],
   .modal-body select,
   .modal-body textarea {
     background: var(--card2);
@@ -1218,6 +1219,61 @@
   .mail-ayuda { margin-top: 10px; }
   .sol-acciones { flex-basis: 100%; display: flex; gap: 8px; justify-content: flex-end; }
   .solicitud-item.con-acciones { flex-wrap: wrap; }
+
+  /* ==================== PESTAÑAS POR ROL + ADMINISTRACION ==================== */
+  /* .tabs usa ademas .surface: no lleva fondo propio. Activa = fondo --card2 +
+     barra inferior + aria-selected (nunca solo color). "Administración" va en
+     minuscula y sin tracking para que entre en ~107 px de ancho. */
+  .tabs {
+    display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 4px;
+    padding: 4px; border-radius: var(--radius-card); margin-bottom: 14px;
+  }
+  .tab {
+    -webkit-appearance: none; appearance: none;
+    background: transparent; border: 0; border-radius: var(--radius-btn);
+    min-height: 52px; padding: 6px 4px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+    font-family: var(--font-sans); font-size: 11px; font-weight: 700; letter-spacing: 0;
+    color: var(--muted); position: relative;
+  }
+  .tab:hover { color: var(--text); }
+  .tab[aria-selected="true"] { background: var(--card2); color: var(--text); box-shadow: inset 0 -3px 0 var(--amber-text); }
+  .tab .badge-count { position: absolute; top: 3px; left: calc(50% + 6px); font-size: 10px; padding: 1px 6px; }
+  .tabs-sec .tab { min-height: 44px; flex-direction: row; font-size: 12px; }
+  /* Una pestaña oculta el contenido de las otras con esta clase (no con hidden:
+     hidden lo usan las vistas por rol y no se pueden mezclar). */
+  .fuera-de-tab { display: none !important; }
+
+  /* Anulada / Retirada: sin efecto en la plata. Borde punteado + icono + texto
+     (nunca solo color) y titulo tachado en las listas. */
+  .chip-sin-efecto { background: transparent; border: 1px dashed var(--muted); color: var(--muted); }
+  .tachado { text-decoration: line-through; text-decoration-thickness: 1px; }
+  .sol-acciones .btn { min-height: 44px; }
+
+  /* Modal de edicion */
+  .edit-paso { display: flex; flex-direction: column; gap: 12px; }
+  .edit-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
+  .edit-chips:empty { display: none; }
+  .estado-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .editar-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .modal-body label.chk {
+    flex-direction: row; text-transform: none; letter-spacing: 0;
+    font-weight: 500; font-size: 13px; color: var(--text);
+  }
+  .cambios-lista { display: flex; flex-direction: column; gap: 8px; }
+  .cambio-fila dt { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); }
+  .cambio-fila dd { font-size: 13px; overflow-wrap: anywhere; }
+  .cambio-antes { color: var(--muted); text-decoration: line-through; }
+  .calc-box.invalid .calc-row-saldo b { color: var(--crimson-text); }
+  details.historial summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; font-size: 12.5px; font-weight: 700; }
+
+  /* Actividad (Administracion > Ultimos cambios) y historial de una solicitud */
+  .actividad-item { padding: 10px 2px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 4px; }
+  .actividad-item:last-child { border-bottom: 0; }
+  .actividad-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .actividad-titulo { font-size: 12.5px; font-weight: 700; overflow-wrap: anywhere; }
+  .actividad-detalle { font-size: 12px; color: var(--text); overflow-wrap: anywhere; }
+  .actividad-pie { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); }
 
   /* ==================== REDUCED MOTION ==================== */
   @media (prefers-reduced-motion: reduce) {

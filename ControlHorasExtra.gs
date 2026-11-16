@@ -45,6 +45,15 @@
  * correr invalidarCacheDirectorio() para que el cambio se refleje al toque
  * en jefeEmail(), personasEmails(), rolDe() y nombreDe(). Si no se corre, el
  * cambio se aplica solo igual, pero puede tardar hasta 5 minutos por el cache.
+ *
+ * ESTADOS de una solicitud o canje (columna Estado): Pendiente | Aprobada |
+ * Rechazada | Anulada | Retirada. Solo Aprobada suma a saldos y liquidacion.
+ *  - Anulada: la dejo sin efecto el Jefe despues de haberla resuelto (o antes).
+ *    Es reversible: el Jefe puede volver a Aprobada/Rechazada/Pendiente.
+ *  - Retirada: la saco su propio autor mientras estaba Pendiente. Es terminal.
+ * Las columnas "Aprobado por" / "Fecha aprobacion" son la ULTIMA DECISION del
+ * Jefe (se vacian si la solicitud vuelve a Pendiente). El historial completo
+ * de cambios vive en la hoja Auditoria. Nunca se borran filas.
  */
 
 // ============================ CONFIG ============================
@@ -94,6 +103,30 @@ const COL_COR  = ['Email','Nombre','Rol','Activo'];
 const COL_FER  = ['Fecha', 'Nombre', 'Fuente'];
 
 const ROLES_VALIDOS = ['Supervisor', 'Jefe', 'Personas'];
+
+// Estados que el Jefe puede elegir al editar una solicitud o un canje. Retirada
+// no esta: la pone solo el autor y es terminal (nadie la edita).
+const ESTADOS_EDITABLES_JEFE = ['Pendiente', 'Aprobada', 'Rechazada', 'Anulada'];
+// Lineas que acepta el alta y la edicion desde la app (una fila cargada por el
+// Form puede traer otro texto, que se conserva mientras no se toque).
+const LINEAS_VALIDAS = ['L1', 'L2', 'L3', 'Varias'];
+
+// Acciones de Auditoria que se muestran en Administracion > Ultimos cambios.
+const ACCIONES_ACTIVIDAD = ['ANULADA', 'DESANULADA', 'VUELTA_A_PENDIENTE', 'CAMBIO_DECISION', 'CORRECCION_DATOS',
+  'EDITADA_SALDO_NEGATIVO', 'SUPERVISOR_EDICION', 'RETIRADA', 'PERSONA_ALTA', 'PERSONA_EDICION',
+  'PERSONA_BAJA', 'PERSONA_REACTIVADA', 'ERROR_MAIL'];
+const ACCION_TEXTO = {
+  ANULADA: 'Anulada', DESANULADA: 'Deja de estar anulada', VUELTA_A_PENDIENTE: 'Volvió a pendiente',
+  CAMBIO_DECISION: 'Cambio de decisión', CORRECCION_DATOS: 'Corrección de datos',
+  EDITADA_SALDO_NEGATIVO: 'Saldo en descubierto', SUPERVISOR_EDICION: 'Corregida por el supervisor',
+  RETIRADA: 'Retirada por el supervisor', PERSONA_ALTA: 'Alta de persona', PERSONA_EDICION: 'Persona modificada',
+  PERSONA_BAJA: 'Persona desactivada', PERSONA_REACTIVADA: 'Persona reactivada', ERROR_MAIL: 'Mail no enviado'
+};
+// Solo para el historial de UNA solicitud (movimientos que no son "actividad").
+const ACCION_TEXTO_HISTORIAL = {
+  ALTA_HE: 'Alta', ALTA_COMP: 'Alta', APROBADA: 'Aprobada', RECHAZADA: 'Rechazada',
+  APROBADA_SALDO_NEGATIVO: 'Aprobada en descubierto'
+};
 
 const CACHE_KEY_DIRECTORIO = 'directorio_correos';
 const CACHE_TTL_DIRECTORIO = 300; // segundos
@@ -814,9 +847,37 @@ function _crearHoraExtra(datos) {
 
   _log(id, 'ALTA_HE', email, horasTexto + ' hs - ' + fechaTexto + ' [' + c.circuito + '/' + c.tipo + ']');
 
-  // El mail SI dice el circuito: el Jefe esta autorizando dos cosas
-  // distintas (un pago o un descanso a cuenta de saldo), y tiene que poder
-  // distinguirlas de un vistazo antes de aprobar.
+  // El mail SI dice el circuito (ver _enviarMailPendienteHE).
+  _enviarMailPendienteHE({
+    to: destinatarioJefe, id: id, token: token, supervisor: supervisor, email: email,
+    fecha: fecha, horas: horas, linea: linea, motivo: motivo
+  });
+
+  return { id: id };
+}
+
+/**
+ * Arma y manda al Jefe el mail de aprobacion de una HE Pendiente. Lo usan el
+ * alta (_crearHoraExtra) y el reenvio cuando el Jefe edita una solicitud y
+ * queda Pendiente. NO lanza nunca: si MailApp falla (cuota, etc.) deja traza
+ * ERROR_MAIL en Auditoria y devuelve false; la fila ya esta guardada.
+ *
+ * El mail SI dice el circuito: el Jefe esta autorizando dos cosas distintas
+ * (un pago o un descanso a cuenta de saldo), y tiene que poder distinguirlas
+ * de un vistazo antes de aprobar.
+ *
+ * @param {{to:string, id:string, token:string, supervisor:string, email:string,
+ *          fecha:(string|Date), horas:number, linea:string, motivo:string,
+ *          prefijoAsunto:(string|undefined), notaHtml:(string|undefined)}} o
+ *   prefijoAsunto y notaHtml son '' en el alta; en el reenvio marcan el
+ *   asunto y van ANTES del cuerpo.
+ * @returns {boolean} true si el mail salio
+ */
+function _enviarMailPendienteHE(o) {
+  const fechaTexto = _fmtFecha(o.fecha);
+  const horasTexto = _fmtHoras(o.horas);
+  const c = circuitoHE(o.fecha);
+
   let lineaTipoDia;
   if (c.circuito === 'LIQ') {
     lineaTipoDia = c.tipo + (c.feriadoNombre ? ' (' + c.feriadoNombre + ')' : '') + ' — LIQUIDABLE (se paga)';
@@ -829,29 +890,29 @@ function _crearHoraExtra(datos) {
 
   try {
     MailApp.sendEmail({
-      to: destinatarioJefe,
-      subject: (c.circuito === 'LIQ' ? '[HE Pendiente · LIQUIDABLE] ' : '[HE Pendiente] ') +
-        supervisor + ' - ' + horasTexto + ' hs - ' + fechaTexto,
-      htmlBody: _mailAprobacion({
+      to: o.to,
+      subject: (o.prefijoAsunto || '') + (c.circuito === 'LIQ' ? '[HE Pendiente · LIQUIDABLE] ' : '[HE Pendiente] ') +
+        o.supervisor + ' - ' + horasTexto + ' hs - ' + fechaTexto,
+      htmlBody: (o.notaHtml || '') + _mailAprobacion({
         titulo: 'Solicitud de Horas Extra',
-        id: id, token: token, tipo: 'HE',
+        id: o.id, token: o.token, tipo: 'HE',
         filas: [
-          ['Supervisor', supervisor],
+          ['Supervisor', o.supervisor],
           ['Fecha HE', fechaTexto],
           ['Horas', horasTexto],
-          ['Linea / Sector', linea],
-          ['Motivo', motivo],
+          ['Linea / Sector', o.linea],
+          ['Motivo', o.motivo],
           ['Tipo de dia', lineaTipoDia]
         ]
       })
     });
+    return true;
   } catch (err) {
-    // La fila ya quedo guardada (arriba). Si el mail falla (cuota, etc.)
-    // dejamos traza en Auditoria en vez de perder la solicitud en silencio.
-    _log(id, 'ERROR_MAIL', email, 'No se pudo notificar al Jefe: ' + err.message);
+    // La fila ya quedo guardada. Si el mail falla dejamos traza en Auditoria
+    // en vez de perder la solicitud en silencio.
+    _log(o.id, 'ERROR_MAIL', o.email, 'No se pudo notificar al Jefe: ' + err.message);
+    return false;
   }
-
-  return { id: id };
 }
 
 function _altaCompensacion(get) {
@@ -903,40 +964,65 @@ function _crearCompensacion(datos) {
   // Resolver el destinatario ANTES de escribir la fila (ver _crearHoraExtra).
   const destinatarioJefe = jefeEmail();
 
-  const alerta = !validacion.ok
-    ? '<p style="background:#B00020;color:#fff;font-weight:bold;padding:10px 14px;' +
-      'border-radius:4px;margin-bottom:16px">ATENCION: saldo insuficiente ' +
-      '(saldo actual: ' + _fmtHoras(validacion.saldo) + ' hs, solicitado ' +
-      _fmtHoras(horas) + ' hs). La solicitud quedo guardada igual como ' +
-      'Pendiente: vos decidis si se aprueba.</p>'
-    : '';
-
   sh.appendRow([id, new Date(), supervisor, email, fecha, horas, tipo,
                 'Pendiente', '', '', '', token]);
 
   _log(id, 'ALTA_COMP', email, _fmtHoras(horas) + ' hs - ' + fechaTexto + (validacion.ok ? '' : ' [SALDO INSUFICIENTE]'));
 
+  _enviarMailPendienteCP({
+    to: destinatarioJefe, id: id, token: token, supervisor: supervisor, email: email,
+    fecha: fecha, tipo: tipo, horas: horas
+  });
+
+  return { id: id, saldoOk: validacion.ok };
+}
+
+/**
+ * Arma y manda al Jefe el mail de aprobacion de un canje Pendiente. Lo usan
+ * el alta (_crearCompensacion) y el reenvio cuando el Jefe edita un canje y
+ * queda Pendiente. Calcula validarCompensacion(email, horas) adentro (alerta
+ * de saldo insuficiente + asunto [SALDO INSUFICIENTE]). NO lanza nunca: si
+ * MailApp falla deja ERROR_MAIL en Auditoria y devuelve false.
+ *
+ * @param {{to:string, id:string, token:string, supervisor:string, email:string,
+ *          fecha:(string|Date), tipo:string, horas:number,
+ *          prefijoAsunto:(string|undefined), notaHtml:(string|undefined)}} o
+ * @returns {boolean} true si el mail salio
+ */
+function _enviarMailPendienteCP(o) {
+  const fechaTexto = _fmtFecha(o.fecha);
+  const validacion = validarCompensacion(o.email, o.horas);
+
+  const alerta = !validacion.ok
+    ? '<p style="background:#B00020;color:#fff;font-weight:bold;padding:10px 14px;' +
+      'border-radius:4px;margin-bottom:16px">ATENCION: saldo insuficiente ' +
+      '(saldo actual: ' + _fmtHoras(validacion.saldo) + ' hs, solicitado ' +
+      _fmtHoras(o.horas) + ' hs). La solicitud quedo guardada igual como ' +
+      'Pendiente: vos decidis si se aprueba.</p>'
+    : '';
+
   try {
     MailApp.sendEmail({
-      to: destinatarioJefe,
-      subject: (validacion.ok ? '' : '[SALDO INSUFICIENTE] ') + '[Compensacion Pendiente] ' + supervisor + ' - ' + fechaTexto,
-      htmlBody: alerta + _mailAprobacion({
+      to: o.to,
+      subject: (o.prefijoAsunto || '') + (validacion.ok ? '' : '[SALDO INSUFICIENTE] ') +
+        '[Compensacion Pendiente] ' + o.supervisor + ' - ' + fechaTexto,
+      htmlBody: (o.notaHtml || '') + alerta + _mailAprobacion({
         titulo: 'Solicitud de Compensacion',
-        id: id, token: token, tipo: 'CP',
+        id: o.id, token: o.token, tipo: 'CP',
         filas: [
-          ['Supervisor', supervisor],
+          ['Supervisor', o.supervisor],
           ['Fecha solicitada', fechaTexto],
-          ['Tipo', tipo],
-          ['Horas a descontar', _fmtHoras(horas)],
+          ['Tipo', o.tipo],
+          ['Horas a descontar', _fmtHoras(o.horas)],
           ['Saldo disponible', _fmtHoras(validacion.saldo) + ' hs']
         ]
       })
     });
+    return true;
   } catch (err) {
-    _log(id, 'ERROR_MAIL', email, 'No se pudo notificar al Jefe: ' + err.message);
+    _log(o.id, 'ERROR_MAIL', o.email, 'No se pudo notificar al Jefe: ' + err.message);
+    return false;
   }
-
-  return { id: id, saldoOk: validacion.ok };
 }
 
 // ==================== VALIDACION DE SALDO ====================
@@ -1034,7 +1120,12 @@ function doGet(e) {
 
     for (let i = 1; i < data.length; i++) {
       if (data[i][0] !== p.id) continue;
-      if (String(data[i][cTok]) !== p.token) return _html('Token invalido.', '#B00020');
+      // Desde que el Jefe puede modificar solicitudes, el token se regenera en cada
+      // cambio: un link de un mail viejo cae aca y es el caso normal, no un error.
+      if (String(data[i][cTok]) !== p.token) {
+        return _html('Este link ya no es valido: la solicitud se modifico despues de que se envio este mail. ' +
+                     'Abri el mail mas reciente o entra a la app.', '#8A6D00');
+      }
       if (data[i][cEst] !== 'Pendiente')
         return _html('Esta solicitud ya fue procesada (' + data[i][cEst] + ').', '#8A6D00');
 
@@ -1107,6 +1198,23 @@ function _tipoDiaTextoLower(tipo) {
   return 'fecha no interpretable';
 }
 
+/**
+ * Linea de saldo de los mails al supervisor (resultado de una aprobacion o
+ * modificacion del Jefe). HTML sin envolver en <p>. Una sola pasada por
+ * Solicitudes: saldoSupervisor() volveria a llamar a _desgloseHE por dentro, y
+ * esto corre dentro del lock.
+ */
+function _lineaSaldoMail(email, esComp) {
+  if (esComp) {
+    return 'Saldo compensable: <b>' + _fmtHoras(saldoSupervisor(email)) + ' hs</b>.';
+  }
+  const d = _desgloseHE(email);
+  const saldoComp = d.compensables - _sumaAprobadas(SH.COMP, email);
+  return 'Saldo compensable: <b>' + _fmtHoras(saldoComp) + ' hs</b> &middot; ' +
+    'En liquidacion desde el ' + CONFIG.VIGENCIA_LIQUIDACION.split('-').reverse().join('/') +
+    ': <b>' + _fmtHoras(d.liqTotal) + ' hs</b>.';
+}
+
 function _notificarResultado(fila, estado, esComp, enc) {
   const cSupervisor = _idx(enc, 'Supervisor');
   const cEmail      = _idx(enc, 'Email');
@@ -1119,10 +1227,7 @@ function _notificarResultado(fila, estado, esComp, enc) {
   const asunto = (esComp ? '[Compensacion ' : '[Horas Extra ') + estado + '] ' + fecha;
 
   let cuerpoExtra = '';
-  let lineaSaldo;
-  if (esComp) {
-    lineaSaldo = 'Saldo compensable: <b>' + _fmtHoras(saldoSupervisor(email)) + ' hs</b>.';
-  } else {
+  if (!esComp) {
     // Rama HE: el mail SI dice el circuito (el Jefe autorizo un pago o un
     // descanso a cuenta de saldo: son cosas distintas y el supervisor
     // tiene que poder distinguirlas).
@@ -1142,17 +1247,11 @@ function _notificarResultado(fila, estado, esComp, enc) {
         'vigencia del ' + CONFIG.VIGENCIA_LIQUIDACION.split('-').reverse().join('/') +
         ': suma al saldo de compensacion (no es retroactiva).</p>';
     }
-    // Una sola pasada por Solicitudes: saldoSupervisor() volveria a llamar a
-    // _desgloseHE por dentro, y esto corre dentro del lock de la aprobacion.
-    const d = _desgloseHE(email);
-    const saldoComp = d.compensables - _sumaAprobadas(SH.COMP, email);
-    lineaSaldo = 'Saldo compensable: <b>' + _fmtHoras(saldoComp) + ' hs</b> &middot; ' +
-      'En liquidacion desde el ' + CONFIG.VIGENCIA_LIQUIDACION.split('-').reverse().join('/') +
-      ': <b>' + _fmtHoras(d.liqTotal) + ' hs</b>.';
   }
+  const lineaSaldo = _lineaSaldoMail(email, esComp);
 
   const cuerpo =
-    '<p>Hola ' + supervisor + ',</p>' +
+    '<p>Hola ' + _escHtml(supervisor) + ',</p>' +
     '<p>Tu solicitud del <b>' + fecha + '</b> (' + horas + ' hs) fue <b>' +
     estado.toLowerCase() + '</b>.</p>' +
     cuerpoExtra +
@@ -1171,8 +1270,16 @@ function _notificarResultado(fila, estado, esComp, enc) {
  * un email. Bloque comun de saldoSupervisor() y de la API (apiEstado,
  * _equipoCompleto): antes esta suma estaba duplicada como closure dentro
  * de saldoSupervisor(); se extrajo aca para no repetirla.
+ *
+ * @param {string} hoja
+ * @param {string} email
+ * @param {{id:string, estado:string, horas:number}} [simular] Opcional. Reemplaza
+ *   el estado y las horas de UNA fila (la de ese ID) solo durante esta pasada,
+ *   SIN tocar la hoja: sirve para calcular el "despues" de una edicion con la
+ *   misma regla que el saldo real. Se sustituye primero y recien despues se
+ *   filtra por Aprobada. Sin este parametro el comportamiento es el de siempre.
  */
-function _sumaAprobadas(hoja, email) {
+function _sumaAprobadas(hoja, email, simular) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const buscado = _normEmail(email);
   const d = ss.getSheetByName(hoja).getDataRange().getValues();
@@ -1181,10 +1288,18 @@ function _sumaAprobadas(hoja, email) {
   const cEmail  = _idx(enc, 'Email');
   const cEstado = _idx(enc, 'Estado');
   const cHoras  = _idx(enc, hoja === SH.SOL ? 'Horas' : 'Horas a compensar');
+  const cId     = simular ? _idx(enc, 'ID') : -1;
   let total = 0;
   for (let i = 1; i < d.length; i++) {
-    if (_normEmail(d[i][cEmail]) === buscado && d[i][cEstado] === 'Aprobada') {
-      total += parseFloat(d[i][cHoras]) || 0;
+    if (_normEmail(d[i][cEmail]) !== buscado) continue;
+    let estado = d[i][cEstado];
+    let horas = d[i][cHoras];
+    if (simular && String(d[i][cId]) === simular.id) {
+      estado = simular.estado;
+      horas = simular.horas;
+    }
+    if (estado === 'Aprobada') {
+      total += parseFloat(horas) || 0;
     }
   }
   return total;
@@ -1197,10 +1312,14 @@ function _sumaAprobadas(hoja, email) {
  * funcion queda vigente SOLO para Compensaciones (_sumaAprobadas(SH.COMP,...)).
  *
  * @param {string} email
+ * @param {{id:string, estado:string, horas:number, fecha:*}} [simular] Opcional.
+ *   Reemplaza estado, horas y fecha de UNA fila (la de ese ID) solo durante la
+ *   pasada, sin tocar la hoja (ver _sumaAprobadas). Primero se sustituye y
+ *   despues se filtra: si no, "Pendiente -> Aprobada" nunca sumaria.
  * @returns {{compensables:number, liqSabDom:number, liqFeriado:number,
  *            liqTotal:number, sinFecha:number}}
  */
-function _desgloseHE(email) {
+function _desgloseHE(email, simular) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const buscado = _normEmail(email);
   const d = ss.getSheetByName(SH.SOL).getDataRange().getValues();
@@ -1212,12 +1331,21 @@ function _desgloseHE(email) {
   const cEstado = _idx(enc, 'Estado');
   const cHoras  = _idx(enc, 'Horas');
   const cFecha  = _idx(enc, 'Fecha HE');
+  const cId     = simular ? _idx(enc, 'ID') : -1;
 
   for (let i = 1; i < d.length; i++) {
     if (_normEmail(d[i][cEmail]) !== buscado) continue;
-    if (d[i][cEstado] !== 'Aprobada') continue;
-    const horas = parseFloat(d[i][cHoras]) || 0;
-    const c = circuitoHE(d[i][cFecha]);
+    let estado = d[i][cEstado];
+    let horasCrudas = d[i][cHoras];
+    let fecha = d[i][cFecha];
+    if (simular && String(d[i][cId]) === simular.id) {
+      estado = simular.estado;
+      horasCrudas = simular.horas;
+      fecha = simular.fecha;
+    }
+    if (estado !== 'Aprobada') continue;
+    const horas = parseFloat(horasCrudas) || 0;
+    const c = circuitoHE(fecha);
 
     if (c.tipo === 'Desconocido') out.sinFecha++;
 
@@ -1236,9 +1364,10 @@ function _desgloseHE(email) {
  * Desde FLC-DOC-RH-092 este saldo es SOLO compensable: las horas
  * liquidables (sabado/domingo/feriado con Fecha HE >= vigencia) NO entran
  * aca, se pagan por otro circuito. Ver _desgloseHE()/circuitoHE().
+ * `simular` (opcional) se pasa tal cual a las dos sumas: ver _desgloseHE().
  */
-function saldoSupervisor(email) {
-  return _desgloseHE(email).compensables - _sumaAprobadas(SH.COMP, email);
+function saldoSupervisor(email, simular) {
+  return _desgloseHE(email, simular).compensables - _sumaAprobadas(SH.COMP, email, simular);
 }
 
 /**
@@ -1662,14 +1791,20 @@ function apiEstado() {
   resultado.misSolicitudes = _filasDe(SH.SOL, yo.email).map(function (f) {
     return {
       id: f.ID, fecha: _fmtFecha(f['Fecha HE']), horas: parseFloat(f.Horas) || 0,
-      linea: f.Linea, motivo: f.Motivo, estado: f.Estado
+      linea: f.Linea, motivo: f.Motivo, estado: f.Estado,
+      // Texto ya normalizado para precargar un formulario de edicion (no es
+      // un Date: google.script.run los serializa con corrimiento de zona).
+      fechaClave: _clavePartes(_partesFecha(f['Fecha HE']))
     };
   }).sort(function (a, b) { return a.id < b.id ? 1 : -1; });
 
   resultado.misCompensaciones = _filasDe(SH.COMP, yo.email).map(function (f) {
+    const horasCanje = parseFloat(f['Horas a compensar']) || 0;
     return {
-      id: f.ID, fecha: _fmtFecha(f['Fecha solicitada']), horas: parseFloat(f['Horas a compensar']) || 0,
-      tipo: f.Tipo, estado: f.Estado
+      id: f.ID, fecha: _fmtFecha(f['Fecha solicitada']), horas: horasCanje,
+      tipo: f.Tipo, estado: f.Estado,
+      fechaClave: _clavePartes(_partesFecha(f['Fecha solicitada'])),
+      tipoClave: _tipoClaveCanje(f.Tipo, horasCanje)
     };
   }).sort(function (a, b) { return a.id < b.id ? 1 : -1; });
 
@@ -1682,6 +1817,9 @@ function apiEstado() {
     liqSabDom: d.liqSabDom, liqFeriado: d.liqFeriado, liqTotal: d.liqTotal
   };
   resultado.politica = { vigencia: CONFIG.VIGENCIA_LIQUIDACION };
+  // Un solo flag de permisos: el cliente decide pestañas y botones por esto y
+  // no por el texto del rol (ver _puedeAdministrar).
+  resultado.permisos = { administrar: _puedeAdministrar(yo) };
 
   // El bloque personal se muestra siempre a los Supervisores (aunque este
   // en cero: es su pantalla principal) y, para los demas roles, solo si
@@ -1711,6 +1849,74 @@ function apiEstado() {
   return resultado;
 }
 
+// ==================== VALIDACIONES COMPARTIDAS (alta y edicion) ====================
+/**
+ * Horas de una hora extra tipeadas por una persona: numero entre 0,5 y 24
+ * (acepta coma decimal). Fuente unica para apiCrearHoraExtra y la edicion.
+ * @returns {number}
+ */
+function _horasHEValidas(valor) {
+  const horas = parseFloat(String(valor == null ? '' : valor).replace(',', '.'));
+  if (!horas || horas < 0.5 || horas > 24) {
+    throw new Error('La cantidad de horas tiene que ser un numero entre 0,5 y 24.');
+  }
+  return horas;
+}
+
+/** Linea de una hora extra: tiene que ser una de LINEAS_VALIDAS. @returns {string} */
+function _lineaValida(valor) {
+  const linea = String(valor || '').trim();
+  if (LINEAS_VALIDAS.indexOf(linea) === -1) {
+    throw new Error('Linea invalida: elegi L1, L2, L3 o Varias.');
+  }
+  return linea;
+}
+
+/**
+ * Tipo y horas de un canje a partir de lo que manda el cliente. El tipo lo
+ * manda el cliente pero las HORAS las calcula el SERVIDOR a partir del tipo
+ * (nunca confiamos en un numero que mande el cliente para dia completo o medio
+ * dia: dejaria manipular el saldo con un payload armado a mano).
+ * @returns {{tipo:string, horas:number, tipoClave:string}}
+ */
+function _tipoYHorasCanje(tipoCrudo, horasCrudas) {
+  const t = String(tipoCrudo || '').trim().toLowerCase();
+  if (t === 'medio') {
+    return { tipo: 'Medio dia', horas: CONFIG.HORAS_POR_DIA / 2, tipoClave: 'medio' };
+  }
+  if (t === 'completo') {
+    return { tipo: 'Dia completo', horas: CONFIG.HORAS_POR_DIA, tipoClave: 'completo' };
+  }
+  if (t === 'personalizado') {
+    // Unico caso donde la cantidad la elige el usuario. En dia completo y
+    // medio dia la calcula el servidor y se ignora cualquier numero que
+    // mande el cliente, para que no se pueda tocar el saldo con un pedido
+    // armado a mano.
+    const horas = Number(horasCrudas);
+    if (!isFinite(horas) || !Number.isInteger(horas) || horas < 1) {
+      throw new Error('La cantidad de horas tiene que ser un numero entero de 1 hora o mas.');
+    }
+    if (horas > 24 * 30) {
+      throw new Error('La cantidad de horas es demasiado alta. Revisala.');
+    }
+    return { tipo: 'Horas sueltas', horas: horas, tipoClave: 'personalizado' };
+  }
+  throw new Error('Tipo de compensacion invalido.');
+}
+
+/**
+ * Clave de radio ('completo' | 'medio' | 'personalizado') de un canje YA
+ * guardado. Incluye las filas del Form, con texto libre en Tipo: si las horas
+ * no son las del dia (o del medio dia), es "personalizado" aunque el texto
+ * diga "Dia completo".
+ */
+function _tipoClaveCanje(tipoTexto, horas) {
+  const esMedio = String(tipoTexto || '').toUpperCase().indexOf('MEDIO') >= 0;
+  if (horas === CONFIG.HORAS_POR_DIA && !esMedio) return 'completo';
+  if (horas === CONFIG.HORAS_POR_DIA / 2 && esMedio) return 'medio';
+  return 'personalizado';
+}
+
 /**
  * Alta de horas extra desde la WebApp. Rol Supervisor o Jefe. El email
  * SIEMPRE es el de la sesion (yo.email) — nunca uno que mande el cliente.
@@ -1725,15 +1931,8 @@ function apiCrearHoraExtra(payload) {
   const fecha = _parsearFechaInput(payload.fecha);
   _validarFechaNoFutura(fecha);
 
-  const horas = parseFloat(String(payload.horas == null ? '' : payload.horas).replace(',', '.'));
-  if (!horas || horas < 0.5 || horas > 24) {
-    throw new Error('La cantidad de horas tiene que ser un numero entre 0,5 y 24.');
-  }
-
-  const linea = String(payload.linea || '').trim();
-  if (['L1', 'L2', 'L3', 'Varias'].indexOf(linea) === -1) {
-    throw new Error('Linea invalida: elegi L1, L2, L3 o Varias.');
-  }
+  const horas = _horasHEValidas(payload.horas);
+  const linea = _lineaValida(payload.linea);
 
   const motivo = String(payload.motivo || '').trim();
   if (!motivo) throw new Error('El motivo no puede estar vacio.');
@@ -1765,30 +1964,8 @@ function apiCrearCompensacion(payload) {
 
   const fecha = _parsearFechaInput(payload.fecha);
 
-  const tipoCrudo = String(payload.tipo || '').trim().toLowerCase();
-  let tipo, horas;
-  if (tipoCrudo === 'medio') {
-    tipo = 'Medio dia';
-    horas = CONFIG.HORAS_POR_DIA / 2;
-  } else if (tipoCrudo === 'completo') {
-    tipo = 'Dia completo';
-    horas = CONFIG.HORAS_POR_DIA;
-  } else if (tipoCrudo === 'personalizado') {
-    // Unico caso donde la cantidad la elige el usuario. En dia completo y
-    // medio dia la calcula el servidor y se ignora cualquier numero que
-    // mande el cliente, para que no se pueda tocar el saldo con un pedido
-    // armado a mano.
-    horas = Number(payload.horas);
-    if (!isFinite(horas) || !Number.isInteger(horas) || horas < 1) {
-      throw new Error('La cantidad de horas tiene que ser un numero entero de 1 hora o mas.');
-    }
-    if (horas > 24 * 30) {
-      throw new Error('La cantidad de horas es demasiado alta. Revisala.');
-    }
-    tipo = 'Horas sueltas';
-  } else {
-    throw new Error('Tipo de compensacion invalido.');
-  }
+  const th = _tipoYHorasCanje(payload.tipo, payload.horas);
+  const tipo = th.tipo, horas = th.horas;
 
   const validacion = validarCompensacion(yo.email, horas);
   if (!validacion.ok) {
@@ -1938,7 +2115,8 @@ function _partesFecha(v) {
  * horasPendientes por supervisor) y el cliente las muestra subordinadas,
  * nunca sumadas al numero principal. Las Rechazadas no suman a ningun
  * total, pero SI aparecen en el `detalle` de su dia: el Jefe quiere ver
- * que paso, no un recorte.
+ * que paso, no un recorte. Las Anuladas y las Retiradas NO aparecen: se
+ * excluyen por completo (siguen en Consulta).
  *
  * Los CANJES (compensaciones) viajan aparte, en `canjes`/`proximosCanjes` y
  * los totales `*Canje*`: NO se meten en `dias`, porque un dia solo-canje
@@ -1980,6 +2158,10 @@ function apiCalendario(anio, mes) {
       if (yo.rol === 'Supervisor' && _normEmail(d[i][cEmail]) !== yo.email) continue;
 
       const estado = d[i][cEstado];
+      // Anulada y Retirada no tienen efecto ni se ven en el calendario: un dia
+      // con solo una anulada quedaria pintado como "rechazado". Tiene que ir
+      // ANTES de crear dias[partes.dia]. El historial esta en Consulta.
+      if (estado === 'Anulada' || estado === 'Retirada') continue;
       const horas = parseFloat(d[i][cHoras]) || 0;
       const supervisor = d[i][cSup];
       const c = circuitoHE(d[i][cFecha]);
@@ -2155,6 +2337,9 @@ function apiConsulta() {
 
       const c = circuitoHE(d[i][cFecha]);
       solicitudes.push({
+        // editable: el cliente muestra "Editar" solo si el servidor lo permite
+        // (Jefe, y no si la saco el autor). Un Supervisor siempre recibe false.
+        editable: _puedeAdministrar(yo, { Email: d[i][cEmail], Estado: d[i][cEstado] }) && d[i][cEstado] !== 'Retirada',
         id: d[i][cId],
         supervisor: d[i][cSup],
         fecha: _partesFecha(d[i][cFecha]),
@@ -2174,11 +2359,606 @@ function apiConsulta() {
     .map(function (c) {
       return {
         id: c.id, supervisor: c.supervisor, fecha: c.partes, fechaTexto: c.fechaTexto,
-        horas: c.horas, tipoCanje: c.tipo, estado: c.estado, comentario: c.comentario
+        horas: c.horas, tipoCanje: c.tipo, estado: c.estado, comentario: c.comentario,
+        editable: _puedeAdministrar(yo, { Email: c.email, Estado: c.estado }) && c.estado !== 'Retirada'
       };
     });
 
   return { solicitudes: solicitudes, canjes: canjes };
+}
+
+// ==================== ADMINISTRACION: EDICION DEL JEFE ====================
+/**
+ * Un solo punto de permisos para administrar (editar/anular) una solicitud o
+ * un canje. Hoy solo el Jefe, y administra todo. Enganche para el futuro
+ * (areas, rol Administrador): aca entra la condicion por area. Lo usan
+ * apiAdminDetalle/apiAdminEditar/apiAdminActividad y el `editable` de
+ * apiConsulta; el cliente solo mira `permisos.administrar` y `editable`.
+ * `fila` ({Email, Estado}) puede ser undefined (permiso general).
+ */
+function _puedeAdministrar(yo, fila) {
+  return !!yo && yo.rol === 'Jefe';
+}
+
+/**
+ * Corre fn dentro del lock de script, con el mismo mensaje de "ocupado" que
+ * apiResolver. Siempre libera el lock.
+ */
+function _conLock(fn) {
+  const lock = LockService.getScriptLock();
+  let tieneLock = false;
+  try {
+    tieneLock = lock.tryLock(10000);
+  } catch (err) {
+    tieneLock = false;
+  }
+  if (!tieneLock) {
+    throw new Error('El sistema esta ocupado procesando otra solicitud. Intenta de nuevo en unos segundos.');
+  }
+  try {
+    return fn();
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * Busca una fila por ID (HE-... en Solicitudes, CP-... en Compensaciones).
+ * Lee la hoja UNA vez.
+ * @returns {{sh:Object, enc:string[], fila:Array, filaHoja:number, esComp:boolean, id:string}}
+ *   filaHoja es 1-based (numero de fila en la hoja).
+ */
+function _buscarFila(id) {
+  id = String(id || '').trim();
+  const esComp = id.indexOf('CP-') === 0;
+  if (!esComp && id.indexOf('HE-') !== 0) throw new Error('ID invalido.');
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(esComp ? SH.COMP : SH.SOL);
+  const data = sh.getDataRange().getValues();
+  if (data.length >= 2) {
+    const enc = data[0];
+    const cId = _idx(enc, 'ID');
+    for (let i = 1; i < data.length; i++) {
+      if (String(data[i][cId]) === id) {
+        return { sh: sh, enc: enc, fila: data[i], filaHoja: i + 1, esComp: esComp, id: id };
+      }
+    }
+  }
+  throw new Error('No se encontro la solicitud.');
+}
+
+/**
+ * Defensa antes de escribir: relee la celda ID de la fila y exige que siga
+ * siendo la misma. Las filas nunca se borran, pero alguien puede ordenar la
+ * hoja a mano entre la lectura y la escritura.
+ */
+function _verificarFila(ref) {
+  const actual = ref.sh.getRange(ref.filaHoja, _idx(ref.enc, 'ID') + 1).getValue();
+  if (String(actual) !== ref.id) throw new Error('La hoja cambio de orden. Volve a intentar.');
+}
+
+/** Escribe UNA celda de la fila, por nombre de columna. */
+function _setCelda(ref, nombreCol, valor) {
+  ref.sh.getRange(ref.filaHoja, _idx(ref.enc, nombreCol) + 1).setValue(valor);
+}
+
+/**
+ * Valores de negocio normalizados de una fila, para comparar y mostrar.
+ * HE:  {estado, fechaClave, fechaTexto, horas, linea, motivo, email, supervisor}
+ * CP:  {estado, fechaClave, fechaTexto, horas, tipo, tipoClave, email, supervisor}
+ * fechaClave es 'yyyy-MM-dd' o null si la fecha no se pudo interpretar.
+ */
+function _valoresFila(ref) {
+  const g = function (nombre) { return ref.fila[_idx(ref.enc, nombre)]; };
+  const crudaFecha = g(ref.esComp ? 'Fecha solicitada' : 'Fecha HE');
+  const v = {
+    estado: String(g('Estado') == null ? '' : g('Estado')),
+    fechaClave: _clavePartes(_partesFecha(crudaFecha)),
+    fechaTexto: _fmtFecha(crudaFecha),
+    email: _normEmail(g('Email')),
+    supervisor: String(g('Supervisor') == null ? '' : g('Supervisor')).trim()
+  };
+  if (ref.esComp) {
+    v.horas = parseFloat(g('Horas a compensar')) || 0;
+    v.tipo = String(g('Tipo') == null ? '' : g('Tipo')).trim();
+    v.tipoClave = _tipoClaveCanje(v.tipo, v.horas);
+  } else {
+    v.horas = parseFloat(g('Horas')) || 0;
+    v.linea = String(g('Linea') == null ? '' : g('Linea')).trim();
+    v.motivo = String(g('Motivo') == null ? '' : g('Motivo')).trim();
+  }
+  return v;
+}
+
+/**
+ * Huella de concurrencia: MD5 (base64) de los valores de negocio de la fila,
+ * SIN el token. apiAdminDetalle la entrega y apiAdminEditar la exige adentro
+ * del lock: si alguien cambio la fila mientras el Jefe tenia el modal abierto,
+ * no coincide y no se escribe nada.
+ */
+function _huella(v, esComp) {
+  const partes = esComp
+    ? [v.estado, v.fechaClave || v.fechaTexto, v.horas, v.tipo]
+    : [v.estado, v.fechaClave || v.fechaTexto, v.horas, v.linea, v.motivo];
+  const s = partes.join('␟');
+  return Utilities.base64Encode(
+    Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, s, Utilities.Charset.UTF_8));
+}
+
+/**
+ * Mes anterior al actual que toca un cambio, o null. Sirve para avisar que se
+ * esta tocando algo de un mes que puede estar ya liquidado (todavia no hay
+ * cierre de mes que lo impida). Compara con _hoyPartes() (CONFIG.TZ).
+ * @param {Array<{anio:number,mes:number,dia:number}|null>} partesLista
+ * @returns {string|null} "julio 2026" (el mas viejo), o null
+ */
+function _mesAnteriorAfectado(partesLista) {
+  const hoy = _hoyPartes();
+  const numHoy = hoy.anio * 100 + hoy.mes;
+  let masViejo = null;
+  partesLista.forEach(function (p) {
+    if (!p) return;
+    const n = p.anio * 100 + p.mes;
+    if (n < numHoy && (masViejo === null || n < masViejo.n)) masViejo = { n: n, anio: p.anio, mes: p.mes };
+  });
+  return masViejo ? _MESES_MIN[masViejo.mes - 1] + ' ' + masViejo.anio : null;
+}
+
+/** Texto de Auditoria: 'Estado: Aprobada -> Anulada; Horas: 3 -> 5' (sin saltos de linea). */
+function _textoCambios(cambios) {
+  return cambios.map(function (c) {
+    return c.campo + ': ' + c.antes + ' -> ' + c.despues;
+  }).join('; ').replace(/\s*[\r\n]+\s*/g, ' ');
+}
+
+/** Nombre a mostrar de una persona: el del directorio, si no el de la fila. */
+function _nombreVisible(email, nombreFila) {
+  return _mapaNombres()[email] || nombreFila || 'Sin nombre';
+}
+
+/** Date -> 'dd/MM/yyyy HH:mm'; cualquier otra cosa, su texto. */
+function _fmtFechaHora(v) {
+  if (v instanceof Date && !isNaN(v.getTime())) {
+    return Utilities.formatDate(v, CONFIG.TZ, 'dd/MM/yyyy HH:mm');
+  }
+  return String(v == null ? '' : v).trim();
+}
+
+/**
+ * Compara los datos que mando el cliente contra los de la fila, campo por
+ * campo, y arma SOLO lo que cambio. Se valida solo lo que cambia: una fila
+ * cargada por el Form puede traer una fecha como texto, una linea "Envasado" o
+ * un canje "Dia completo" con horas que no son 8, y abrir y guardar sin tocar
+ * nada NO tiene que convertirla ni dejar un cambio fantasma.
+ *
+ * No incluye el Estado (lo maneja quien llama).
+ * @returns {{cambios:Array, celdas:Object, horas:number, fecha:*, linea:string,
+ *            motivo:string, tipo:string}}
+ *   celdas: {nombreDeColumna: valorNuevo} solo de lo que cambio.
+ *   fecha: valor crudo (Date o el original) para clasificar/simular.
+ */
+function _calcularCambiosDatos(ref, v, payload) {
+  const esComp = ref.esComp;
+  const colFecha = esComp ? 'Fecha solicitada' : 'Fecha HE';
+  const cambios = [];
+  const celdas = {};
+  let fecha = ref.fila[_idx(ref.enc, colFecha)];
+  let horas = v.horas, linea = v.linea, motivo = v.motivo, tipo = v.tipo;
+
+  const fechaIn = String(payload.fecha == null ? '' : payload.fecha).trim();
+  if (fechaIn !== (v.fechaClave || '')) {
+    const f = _parsearFechaInput(fechaIn);
+    if (!esComp) _validarFechaNoFutura(f);
+    fecha = f;
+    celdas[colFecha] = f;
+    cambios.push({ campo: 'Fecha', antes: v.fechaTexto || '(sin fecha)', despues: _fmtFecha(f) });
+  }
+
+  if (!esComp) {
+    const horasIn = parseFloat(String(payload.horas == null ? '' : payload.horas).replace(',', '.'));
+    if (!(Math.abs(horasIn - v.horas) < 1e-9)) {
+      horas = _horasHEValidas(payload.horas);
+      celdas['Horas'] = horas;
+      cambios.push({ campo: 'Horas', antes: _fmtHoras(v.horas), despues: _fmtHoras(horas) });
+    }
+    const lineaIn = String(payload.linea == null ? '' : payload.linea).trim();
+    if (lineaIn !== v.linea) {
+      linea = _lineaValida(lineaIn);
+      celdas['Linea'] = linea;
+      cambios.push({ campo: 'Linea', antes: v.linea || '(sin linea)', despues: linea });
+    }
+    const motivoIn = String(payload.motivo == null ? '' : payload.motivo).trim();
+    if (motivoIn !== v.motivo) {
+      if (!motivoIn) throw new Error('El motivo no puede estar vacio.');
+      motivo = motivoIn;
+      celdas['Motivo'] = motivo;
+      cambios.push({ campo: 'Motivo', antes: v.motivo || '(vacio)', despues: motivo });
+    }
+  } else {
+    const tipoIn = String(payload.tipo == null ? '' : payload.tipo).trim().toLowerCase();
+    // Sin cambio de tipo ni de horas: no se toca nada (ni se revalida), asi un
+    // canje del Form con horas "raras" se puede abrir y guardar sin tropiezos.
+    const igual = tipoIn === v.tipoClave &&
+                  (tipoIn !== 'personalizado' || Number(payload.horas) === v.horas);
+    if (!igual) {
+      const nuevo = _tipoYHorasCanje(payload.tipo, payload.horas);
+      if (nuevo.tipo !== v.tipo) {
+        tipo = nuevo.tipo;
+        celdas['Tipo'] = tipo;
+        cambios.push({ campo: 'Tipo', antes: v.tipo || '(sin tipo)', despues: tipo });
+      }
+      if (nuevo.horas !== v.horas) {
+        horas = nuevo.horas;
+        celdas['Horas a compensar'] = horas;
+        cambios.push({ campo: 'Horas', antes: _fmtHoras(v.horas), despues: _fmtHoras(horas) });
+      }
+    }
+  }
+  return { cambios: cambios, celdas: celdas, horas: horas, fecha: fecha, linea: linea, motivo: motivo, tipo: tipo };
+}
+
+/**
+ * Historial de Auditoria de UN id, mas nuevo primero.
+ * @returns {Array<{ts:string, accionTexto:string, usuario:string, detalle:string}>}
+ */
+function _historialDe(id, max) {
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SH.LOG);
+  const out = [];
+  if (!sh) return out;
+  const d = sh.getDataRange().getValues();
+  if (d.length < 2) return out;
+  const enc = d[0];
+  const cTs = _idx(enc, 'Timestamp'), cId = _idx(enc, 'ID'), cAcc = _idx(enc, 'Accion'),
+        cUsu = _idx(enc, 'Usuario'), cDet = _idx(enc, 'Detalle');
+  const nombres = _mapaNombres();
+  for (let i = d.length - 1; i >= 1 && out.length < max; i--) {
+    if (String(d[i][cId]) !== id) continue;
+    const acc = String(d[i][cAcc]);
+    const usu = String(d[i][cUsu] || '');
+    out.push({
+      ts: _fmtFechaHora(d[i][cTs]),
+      accionTexto: ACCION_TEXTO[acc] || ACCION_TEXTO_HISTORIAL[acc] || acc,
+      usuario: nombres[_normEmail(usu)] || usu,
+      detalle: String(d[i][cDet] || '')
+    });
+  }
+  return out;
+}
+
+/**
+ * Detalle fresco de una solicitud o canje para abrir el modal de edicion.
+ * SOLO Jefe. Solo lee (sin lock). Nunca devuelve el token: la huella no lo
+ * incluye.
+ *
+ * @param {string} id HE-... o CP-...
+ */
+function apiAdminDetalle(id) {
+  const yo = _identificar(['Jefe']);
+  const ref = _buscarFila(id);
+  const v = _valoresFila(ref);
+  if (!_puedeAdministrar(yo, { Email: v.email, Estado: v.estado })) {
+    throw new Error('No tenes permiso sobre esta solicitud.');
+  }
+
+  const nombres = _mapaNombres();
+  const cApr = _idx(ref.enc, 'Aprobado por'), cFecApr = _idx(ref.enc, 'Fecha aprobacion');
+  const aprPor = String(ref.fila[cApr] || '').trim();
+  const retirada = v.estado === 'Retirada';
+
+  const out = {
+    id: ref.id,
+    mov: ref.esComp ? 'CP' : 'HE',
+    estado: v.estado,
+    supervisor: nombres[v.email] || v.supervisor,
+    fechaClave: v.fechaClave,
+    fechaTexto: v.fechaTexto,
+    horas: v.horas,
+    ultimaDecision: {
+      por: aprPor ? (nombres[_normEmail(aprPor)] || aprPor) : '',
+      fecha: aprPor ? _fmtFechaHora(ref.fila[cFecApr]) : ''
+    },
+    huella: _huella(v, ref.esComp),
+    editable: !retirada,
+    motivoNoEditable: retirada ? 'La retiro el supervisor: no se puede modificar.' : '',
+    saldo: { compensable: saldoSupervisor(v.email), liqTotal: _desgloseHE(v.email).liqTotal },
+    historial: _historialDe(ref.id, 20)
+  };
+  if (ref.esComp) {
+    out.tipoCanje = v.tipo;
+    out.tipoClave = v.tipoClave;
+  } else {
+    const c = circuitoHE(ref.fila[_idx(ref.enc, 'Fecha HE')]);
+    out.linea = v.linea;
+    out.motivo = v.motivo;
+    out.circuito = c.circuito;
+    out.tipoDia = c.tipo;
+  }
+  return out;
+}
+
+/**
+ * Previsualiza (confirmar=false) o guarda (confirmar=true) un cambio del Jefe
+ * sobre una solicitud o canje, en cualquier estado salvo Retirada. SOLO Jefe.
+ * Todo adentro del lock. Se repite TODO en confirmar=true (huella, validaciones
+ * y descubierto): la previsualizacion no es una promesa.
+ *
+ * Los numeros del resumen salen de saldoSupervisor/_desgloseHE con `simular`
+ * (la misma regla que el saldo real): el cliente no calcula plata.
+ *
+ * Al guardar: escribe solo lo que cambio, regenera el Token (los links de
+ * mails anteriores dejan de valer), deja Auditoria con antes/despues y motivo,
+ * y manda mail al supervisor con copia a Personas. Si queda Pendiente, le
+ * reenvia al Jefe el mail de aprobacion con el token nuevo. Los mails van
+ * DESPUES de escribir, cada uno en su try/catch: si fallan, el cambio queda.
+ *
+ * @param {{id:string, huella:string, estado:string, fecha:string, horas:(number|string),
+ *          linea:string, motivo:string, tipo:string, motivoCambio:string,
+ *          confirmar:boolean, aceptarDescubierto:boolean}} payload
+ */
+function apiAdminEditar(payload) {
+  const yo = _identificar(['Jefe']);
+  payload = payload || {};
+
+  const motivoCambio = String(payload.motivoCambio == null ? '' : payload.motivoCambio).trim();
+  if (!motivoCambio) throw new Error('Escribi el motivo del cambio.');
+  if (motivoCambio.length > 500) throw new Error('El motivo del cambio es demasiado largo (maximo 500).');
+
+  return _conLock(function () {
+    const ref = _buscarFila(payload.id);
+    const v = _valoresFila(ref);
+    if (!_puedeAdministrar(yo, { Email: v.email, Estado: v.estado })) {
+      throw new Error('No tenes permiso sobre esta solicitud.');
+    }
+    if (v.estado === 'Retirada') throw new Error('La retiro el supervisor: no se puede modificar.');
+    if (_huella(v, ref.esComp) !== String(payload.huella || '')) {
+      throw new Error('La solicitud cambio mientras la editabas. Cerrá y volvé a abrirla.');
+    }
+
+    const nuevoEstado = String(payload.estado == null ? '' : payload.estado);
+    if (ESTADOS_EDITABLES_JEFE.indexOf(nuevoEstado) === -1) throw new Error('Estado invalido.');
+
+    const datos = _calcularCambiosDatos(ref, v, payload);
+    const cambios = datos.cambios.slice();
+    const estadoCambio = nuevoEstado !== v.estado;
+    if (estadoCambio) cambios.unshift({ campo: 'Estado', antes: v.estado || '(vacio)', despues: nuevoEstado });
+    if (!cambios.length) throw new Error('No hay cambios para guardar.');
+
+    // Antes / despues con la fuente unica de plata.
+    const sim = { id: ref.id, estado: nuevoEstado, horas: datos.horas, fecha: datos.fecha };
+    const r2 = function (n) { return Math.round(n * 100) / 100; };
+    const saldoAntes = r2(saldoSupervisor(v.email));
+    const saldoDespues = r2(saldoSupervisor(v.email, sim));
+    const liqAntes = r2(_desgloseHE(v.email).liqTotal);
+    const liqDespues = r2(_desgloseHE(v.email, sim).liqTotal);
+    const descubierto = saldoDespues < 0 && saldoDespues < saldoAntes;
+
+    let circuito = null;
+    if (!ref.esComp) {
+      const cAntes = circuitoHE(ref.fila[_idx(ref.enc, 'Fecha HE')]).circuito;
+      const cDespues = circuitoHE(datos.fecha).circuito;
+      if (cAntes !== cDespues) circuito = { antes: cAntes, despues: cDespues };
+    }
+
+    // Aviso de mes anterior (D9): solo si hay una Aprobada de por medio.
+    let mesAnterior = null;
+    if (v.estado === 'Aprobada' || nuevoEstado === 'Aprobada') {
+      mesAnterior = _mesAnteriorAfectado([_partesFecha(ref.fila[_idx(ref.enc, ref.esComp ? 'Fecha solicitada' : 'Fecha HE')]),
+                                          _partesFecha(datos.fecha)]);
+    }
+
+    const nombre = _nombreVisible(v.email, v.supervisor);
+    const pers = personasEmails();
+    const resumen = {
+      id: ref.id,
+      mov: ref.esComp ? 'CP' : 'HE',
+      supervisor: nombre,
+      cambios: cambios,
+      saldo: { antes: saldoAntes, despues: saldoDespues },
+      liq: { antes: liqAntes, despues: liqDespues },
+      circuito: circuito,
+      descubierto: descubierto,
+      mesAnterior: mesAnterior,
+      quedaPendiente: nuevoEstado === 'Pendiente',
+      avisaA: { supervisor: nombre, personas: pers ? pers.split(',').length : 0 },
+      motivoCambio: motivoCambio
+    };
+
+    if (!payload.confirmar) return { ok: false, requiereConfirmacion: true, resumen: resumen };
+    if (descubierto && !payload.aceptarDescubierto) {
+      return { ok: false, requiereConfirmacion: true, resumen: resumen };
+    }
+
+    // ---- Escribir (celda por celda, solo lo que cambio) ----
+    _verificarFila(ref);
+    Object.keys(datos.celdas).forEach(function (col) { _setCelda(ref, col, datos.celdas[col]); });
+    if (estadoCambio) {
+      _setCelda(ref, 'Estado', nuevoEstado);
+      // "Aprobado por" / "Fecha aprobacion" son la ULTIMA decision: con una
+      // decision se escribe el Jefe y la hora; al volver a Pendiente se vacian.
+      if (nuevoEstado === 'Pendiente') {
+        _setCelda(ref, 'Aprobado por', '');
+        _setCelda(ref, 'Fecha aprobacion', '');
+      } else {
+        _setCelda(ref, 'Aprobado por', yo.email);
+        _setCelda(ref, 'Fecha aprobacion', new Date());
+      }
+    }
+    // El token se regenera en TODA modificacion: cualquier link de un mail
+    // anterior muere y no puede pisar la decision nueva.
+    const nuevoToken = Utilities.getUuid();
+    _setCelda(ref, 'Token', nuevoToken);
+
+    // ---- Auditoria ----
+    let accion;
+    if (estadoCambio && nuevoEstado === 'Anulada') accion = 'ANULADA';
+    else if (estadoCambio && v.estado === 'Anulada') accion = 'DESANULADA';
+    else if (estadoCambio && nuevoEstado === 'Pendiente') accion = 'VUELTA_A_PENDIENTE';
+    else if (estadoCambio) accion = 'CAMBIO_DECISION';
+    else accion = 'CORRECCION_DATOS';
+    _log(ref.id, accion, yo.email, _textoCambios(cambios) +
+         ' | Motivo: ' + motivoCambio.replace(/\s*[\r\n]+\s*/g, ' ') +
+         ' | Saldo compensable: ' + _fmtHoras(saldoAntes) + ' -> ' + _fmtHoras(saldoDespues));
+    if (descubierto) {
+      _log(ref.id, 'EDITADA_SALDO_NEGATIVO', yo.email,
+           'Saldo compensable queda en ' + _fmtHoras(saldoDespues) + ' hs, confirmado por el Jefe.');
+    }
+
+    // ---- Mails (despues de escribir, cada uno en su try/catch) ----
+    let mailEnviado = false;
+    const avisos = [];
+    if (!v.email || _esEmailPlaceholder(v.email)) {
+      avisos.push('El cambio se guardo, pero el supervisor no tiene un correo real cargado: no se le mando el mail.');
+    } else {
+      try {
+        _mailModificacion({
+          to: v.email, cc: pers, id: ref.id, mov: resumen.mov, email: v.email, supervisor: nombre,
+          fechaTexto: _fmtFecha(datos.fecha), estadoFinal: nuevoEstado, cambios: cambios,
+          motivoCambio: motivoCambio, mesAnterior: mesAnterior, esAnulacion: nuevoEstado === 'Anulada'
+        });
+        mailEnviado = true;
+      } catch (err) {
+        _log(ref.id, 'ERROR_MAIL', yo.email, 'No se pudo avisar la modificacion: ' + err.message);
+        avisos.push('El cambio se guardo, pero no se pudo mandar el mail al supervisor. Quedo registrado en Auditoria.');
+      }
+    }
+
+    let reenvioAprobacion = false;
+    if (nuevoEstado === 'Pendiente') {
+      try {
+        const nota = '<div style="font-family:Arial,sans-serif;max-width:520px;background:#FFF4D6;' +
+          'border:1px solid #F8C040;border-radius:4px;padding:10px 14px;margin-bottom:16px;font-size:13px;color:#333">' +
+          '<b>' + (estadoCambio ? 'Esta solicitud volvio a Pendiente.' : 'Esta solicitud se corrigio.') + '</b> ' +
+          'Los links de los mails anteriores ya no sirven: usa los botones de este mail.<br>' +
+          cambios.map(function (c) {
+            return _escHtml(c.campo) + ': <s>' + _escHtml(c.antes) + '</s> &rarr; ' + _escHtml(c.despues);
+          }).join('<br>') +
+          '<br>Motivo: ' + _escHtml(motivoCambio) + '</div>';
+        const o = {
+          to: jefeEmail(), id: ref.id, token: nuevoToken, supervisor: nombre, email: v.email,
+          fecha: datos.fecha, horas: datos.horas,
+          prefijoAsunto: estadoCambio ? '[VUELVE A PENDIENTE] ' : '[CORREGIDA] ', notaHtml: nota
+        };
+        if (ref.esComp) o.tipo = datos.tipo; else { o.linea = datos.linea; o.motivo = datos.motivo; }
+        reenvioAprobacion = ref.esComp ? _enviarMailPendienteCP(o) : _enviarMailPendienteHE(o);
+      } catch (err) {
+        _log(ref.id, 'ERROR_MAIL', yo.email, 'No se pudo reenviar la aprobacion: ' + err.message);
+        reenvioAprobacion = false;
+      }
+      if (!reenvioAprobacion) {
+        avisos.push('No se pudo reenviar el mail de aprobacion: la solicitud esta en Pendiente igual, apruebala desde la app.');
+      }
+    }
+
+    return {
+      ok: true, id: ref.id, estado: nuevoEstado, mailEnviado: mailEnviado,
+      avisoMail: avisos.join(' '), reenvioAprobacion: reenvioAprobacion
+    };
+  });
+}
+
+/**
+ * Mail al supervisor cuando el Jefe modifica o anula una solicitud o un
+ * canje. TODO valor que escribio una persona pasa por _escHtml. Lanza si
+ * MailApp falla: lo atrapa quien llama.
+ *
+ * @param {{to:string, cc:string, id:string, mov:string, email:string, supervisor:string,
+ *          fechaTexto:string, estadoFinal:string, cambios:Array, motivoCambio:string,
+ *          mesAnterior:(string|null), esAnulacion:boolean}} o
+ */
+function _mailModificacion(o) {
+  const esComp = o.mov === 'CP';
+  const asunto = (esComp
+    ? '[Canje · ' + (o.esAnulacion ? 'Anulado' : 'Modificado')
+    : '[Horas Extra · ' + (o.esAnulacion ? 'Anulada' : 'Modificada')) + '] ' + o.fechaTexto;
+
+  const celda = 'padding:6px 12px 6px 0;vertical-align:top';
+  let filas = '';
+  o.cambios.forEach(function (c) {
+    filas += '<tr><td style="' + celda + ';color:#666">' + _escHtml(c.campo) + '</td>' +
+             '<td style="' + celda + ';color:#666"><s>' + _escHtml(c.antes) + '</s></td>' +
+             '<td style="padding:6px 0;vertical-align:top"><b>' + _escHtml(c.despues) + '</b></td></tr>';
+  });
+
+  const cuerpo =
+    '<p>Hola ' + _escHtml(o.supervisor) + ',</p>' +
+    '<p>El Jefe modifico tu solicitud del <b>' + _escHtml(o.fechaTexto) + '</b> (' + _escHtml(o.id) + ').</p>' +
+    '<table style="font-size:14px;border-collapse:collapse">' +
+    '<tr><th align="left" style="' + celda + ';font-size:11px;color:#999">Campo</th>' +
+    '<th align="left" style="' + celda + ';font-size:11px;color:#999">Antes</th>' +
+    '<th align="left" style="padding:6px 0;font-size:11px;color:#999">Despues</th></tr>' +
+    filas + '</table>' +
+    '<p>Estado actual: <b>' + _escHtml(o.estadoFinal) + '</b>.' +
+    (o.esAnulacion ? ' Queda sin efecto: no suma a tu saldo ni a la liquidacion.' : '') + '</p>' +
+    '<p>Motivo: ' + _escHtml(o.motivoCambio) + '</p>' +
+    (o.mesAnterior
+      ? '<p style="background:#B00020;color:#fff;font-weight:bold;padding:10px 14px;border-radius:4px">' +
+        'Afecta ' + _escHtml(o.mesAnterior) + ', que puede estar ya liquidado.</p>'
+      : '') +
+    '<p>' + _lineaSaldoMail(o.email, esComp) + '</p>' +
+    '<p style="font-size:11px;color:#777">' + CONFIG.NOMBRE_PLANTA + '</p>';
+
+  const opciones = { to: o.to, subject: asunto, htmlBody: cuerpo };
+  if (o.cc) opciones.cc = o.cc;
+  MailApp.sendEmail(opciones);
+}
+
+/**
+ * Ultimos cambios para Administracion > Solicitudes y canjes: la actividad de
+ * Auditoria (solo ACCIONES_ACTIVIDAD), mas nueva primero, maximo 40. SOLO
+ * Jefe. Sin lock. `ref` sale de UNA lectura de Solicitudes y UNA de
+ * Compensaciones; para las acciones sobre personas el id es un correo y ref es
+ * null. Nunca devuelve el token.
+ */
+function apiAdminActividad() {
+  const yo = _identificar(['Jefe']);
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const nombres = _mapaNombres();
+
+  const mapaRef = {};
+  [[SH.SOL, 'HE'], [SH.COMP, 'CP']].forEach(function (par) {
+    const d = ss.getSheetByName(par[0]).getDataRange().getValues();
+    if (d.length < 2) return;
+    const enc = d[0];
+    const esComp = par[1] === 'CP';
+    const cId = _idx(enc, 'ID'), cSup = _idx(enc, 'Supervisor'), cEmail = _idx(enc, 'Email'),
+          cFecha = _idx(enc, esComp ? 'Fecha solicitada' : 'Fecha HE'),
+          cHoras = _idx(enc, esComp ? 'Horas a compensar' : 'Horas'), cEstado = _idx(enc, 'Estado');
+    for (let i = 1; i < d.length; i++) {
+      const email = _normEmail(d[i][cEmail]);
+      mapaRef[String(d[i][cId])] = {
+        mov: par[1], email: email,
+        supervisor: nombres[email] || String(d[i][cSup] || '').trim() || 'Sin nombre',
+        fechaTexto: _fmtFecha(d[i][cFecha]), horas: parseFloat(d[i][cHoras]) || 0,
+        estado: String(d[i][cEstado] || '')
+      };
+    }
+  });
+
+  const items = [];
+  const sh = ss.getSheetByName(SH.LOG);
+  const d = sh ? sh.getDataRange().getValues() : [];
+  if (d.length >= 2) {
+    const enc = d[0];
+    const cTs = _idx(enc, 'Timestamp'), cId = _idx(enc, 'ID'), cAcc = _idx(enc, 'Accion'),
+          cUsu = _idx(enc, 'Usuario'), cDet = _idx(enc, 'Detalle');
+    for (let i = d.length - 1; i >= 1 && items.length < 40; i--) {
+      const acc = String(d[i][cAcc]);
+      if (ACCIONES_ACTIVIDAD.indexOf(acc) === -1) continue;
+      const id = String(d[i][cId]);
+      const r = mapaRef[id] || null;
+      const usu = String(d[i][cUsu] || '');
+      items.push({
+        ts: _fmtFechaHora(d[i][cTs]),
+        id: id,
+        accion: acc,
+        accionTexto: ACCION_TEXTO[acc] || acc,
+        usuario: nombres[_normEmail(usu)] || usu,
+        detalle: String(d[i][cDet] || ''),
+        ref: r ? { mov: r.mov, supervisor: r.supervisor, fechaTexto: r.fechaTexto, horas: r.horas, estado: r.estado } : null,
+        editable: !!r && _puedeAdministrar(yo, { Email: r.email, Estado: r.estado }) && r.estado !== 'Retirada'
+      });
+    }
+  }
+  return { items: items };
 }
 
 // ==================== MAIL DE CANJE ====================

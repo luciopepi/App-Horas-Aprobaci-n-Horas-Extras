@@ -63,6 +63,32 @@
       </div>
     </header>
 
+    <!-- ==================== PESTAÑAS (Jefe: 3, Personas: 2, Supervisor: sin barra) ==================== -->
+    <nav class="tabs surface" id="tabBar" role="tablist" aria-label="Secciones" hidden>
+      <button type="button" class="tab" role="tab" id="tabBtnInicio" data-tab="inicio" aria-selected="true" aria-controls="jefeInicio" tabindex="0">
+        <svg class="icon icon-18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/></svg>
+        <span>Inicio</span>
+        <span class="badge-count" id="tabBadgePend" hidden>0</span>
+      </button>
+      <button type="button" class="tab" role="tab" id="tabBtnConsulta" data-tab="consulta" aria-selected="false" aria-controls="conJefeCard" tabindex="-1">
+        <svg class="icon icon-18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <span>Consulta</span>
+      </button>
+      <button type="button" class="tab" role="tab" id="tabBtnAdmin" data-tab="admin" aria-selected="false" aria-controls="viewAdmin" tabindex="-1" hidden>
+        <svg class="icon icon-18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+        <span>Administración</span>
+      </button>
+    </nav>
+
+    <!-- Aviso global (por ejemplo, un mail que no salio): visible en todas las pestañas hasta que se toca "Entendido". -->
+    <div id="avisoGlobal" class="card surface card-atencion aviso-politica" role="status" hidden>
+      <svg class="icon icon-20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+      <div>
+        <p id="avisoGlobalTexto"></p>
+        <button type="button" class="btn btn-ghost btn-sm" id="avisoGlobalCerrar">Entendido</button>
+      </div>
+    </div>
+
     <!-- ==================== CARGANDO (skeleton) ==================== -->
     <div id="viewCargando" aria-live="polite" aria-busy="true">
       <div class="skeleton-wrap">
@@ -92,7 +118,7 @@
     </div>
 
     <!-- ==================== VISTA SUPERVISOR ==================== -->
-    <section id="viewSupervisor" class="view" aria-labelledby="tituloSupervisor" hidden>
+    <section id="viewSupervisor" class="view" data-panel="inicio" aria-labelledby="tituloSupervisor" hidden>
       <h1 id="tituloSupervisor" class="visually-hidden">Tu saldo y tus solicitudes</h1>
 
       <section class="card surface card-atencion aviso-politica" id="avisoPolitica" hidden>
@@ -163,7 +189,7 @@
     <section id="viewJefe" class="view" aria-labelledby="tituloJefe" hidden>
       <h1 id="tituloJefe" class="visually-hidden">Pendientes y saldos del equipo</h1>
 
-      <div class="jefe-grid">
+      <div class="jefe-grid" id="jefeInicio" data-panel="inicio">
         <div>
           <div class="jefe-header-row">
             <div class="section-title"><h2 class="h3">Pendientes</h2><span class="badge-count" id="pendCount">0</span></div>
@@ -177,7 +203,7 @@
         </section>
       </div>
 
-      <section class="card surface" id="conJefeCard" aria-labelledby="conJefeHeading">
+      <section class="card surface" id="conJefeCard" data-panel="consulta" aria-labelledby="conJefeHeading">
         <div class="section-title"><h2 class="h3" id="conJefeHeading">Consulta</h2></div>
         <div class="filtros-grid">
           <label class="filtro-full">Supervisor
@@ -192,6 +218,8 @@
               <option value="Aprobada">Aprobada</option>
               <option value="Pendiente">Pendiente</option>
               <option value="Rechazada">Rechazada</option>
+              <option value="Anulada">Anulada</option>
+              <option value="Retirada">Retirada</option>
             </select>
           </label>
           <label>Mes
@@ -227,7 +255,7 @@
         <ul class="solicitudes-list con-lista" id="conJefeLista"><!-- via JS --></ul>
       </section>
 
-      <section class="card cal-card surface" aria-labelledby="calJefeHeading">
+      <section class="card cal-card surface" data-panel="consulta" aria-labelledby="calJefeHeading">
         <div class="section-title"><h2 class="h3" id="calJefeHeading">Calendario</h2></div>
         <div class="cal-header">
           <button type="button" class="cal-nav-btn" id="calJefePrev" aria-label="Mes anterior">
@@ -241,6 +269,35 @@
         <div id="calJefeBody" aria-live="polite"><!-- grilla via JS --></div>
       </section>
 
+      <!-- ==================== ADMINISTRACION (solo Jefe) ==================== -->
+      <section id="viewAdmin" data-panel="admin" aria-labelledby="adminHeading">
+        <h2 class="visually-hidden" id="adminHeading">Administración</h2>
+
+        <!-- Segmentado Solicitudes y canjes / Personas: se muestra cuando exista la seccion Personas. -->
+        <div class="tabs tabs-sec surface" id="adminSeg" role="tablist" aria-label="Qué administrar" hidden>
+          <button type="button" class="tab" role="tab" id="adminSegSolicitudes" aria-selected="true" tabindex="0">Solicitudes y canjes</button>
+          <button type="button" class="tab" role="tab" id="adminSegPersonas" aria-selected="false" tabindex="-1">Personas</button>
+        </div>
+
+        <div id="adminSecSolicitudes">
+          <section class="card surface card-neutral" style="margin-bottom:12px">
+            <div class="eyebrow" style="margin-bottom:6px">Cómo editar</div>
+            <p class="body-sm" style="margin-bottom:12px">Buscá el movimiento en Consulta y tocá Editar. Podés cambiar la decisión, corregir datos o anular. Nada se borra: todo queda registrado y se le avisa al supervisor.</p>
+            <button type="button" class="btn btn-ghost" data-ir-tab="consulta" style="width:100%">Ir a Consulta <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg></button>
+          </section>
+
+          <section class="card surface list-card" aria-labelledby="adminActividadTitulo">
+            <div class="jefe-header-row">
+              <h3 class="h3" id="adminActividadTitulo">Últimos cambios</h3>
+              <button type="button" class="btn btn-ghost btn-sm" id="adminActividadRecargar"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v6h-6"/></svg> Actualizar</button>
+            </div>
+            <ul class="actividad-lista" id="adminActividadLista" aria-live="polite"><!-- items via JS --></ul>
+          </section>
+        </div>
+
+        <div id="adminSecPersonas" hidden></div>
+      </section>
+
       <p class="foot-note">VSPT Wine Group · Planta Graffigna · San Juan, Argentina</p>
     </section>
 
@@ -248,53 +305,55 @@
     <section id="viewPersonas" class="view" aria-labelledby="tituloPersonas" hidden>
       <h1 id="tituloPersonas" class="visually-hidden">Vista Gerencia de Personas</h1>
 
-      <div class="eyebrow" style="margin-bottom:4px">Gerencia de Personas</div>
-      <div class="h2" style="margin-bottom:14px">Saldos de horas extra — Fraccionamiento</div>
+      <div id="personasInicio" data-panel="inicio">
+        <div class="eyebrow" style="margin-bottom:4px">Gerencia de Personas</div>
+        <div class="h2" style="margin-bottom:14px">Saldos de horas extra — Fraccionamiento</div>
 
-      <div class="kpi-grid kpi-grid-4">
-        <section class="card kpi-card kpi-mini surface card-neutral">
-          <div class="kpi-label">HE del mes (planta)</div>
-          <div class="kpi-value" id="personasTotalMes">0,0 hs</div>
-          <div class="kpi-sub">Todas las lineas, mes en curso</div>
-        </section>
-        <section class="card kpi-card kpi-mini surface card-atencion">
-          <div class="kpi-label">Pendientes de aprobacion</div>
-          <div class="kpi-value" id="personasPendientes">0</div>
-          <div class="kpi-sub">Esperando al Jefe</div>
-        </section>
-        <section class="card kpi-card kpi-mini surface card-ok">
-          <div class="kpi-label">Saldo compensable (planta)</div>
-          <div class="kpi-value" id="personasSaldoTotal">0,0 hs</div>
-          <div class="kpi-sub">Generadas menos compensadas</div>
-        </section>
-        <section class="card kpi-card kpi-mini surface card-neutral">
-          <div class="kpi-label">En liquidacion (planta)</div>
-          <div class="kpi-value" id="personasLiqTotal">0,0 hs</div>
-          <div class="kpi-sub">Sab/dom + feriados desde <span class="vig-fecha">01/08/2026</span></div>
+        <div class="kpi-grid kpi-grid-4">
+          <section class="card kpi-card kpi-mini surface card-neutral">
+            <div class="kpi-label">HE del mes (planta)</div>
+            <div class="kpi-value" id="personasTotalMes">0,0 hs</div>
+            <div class="kpi-sub">Todas las lineas, mes en curso</div>
+          </section>
+          <section class="card kpi-card kpi-mini surface card-atencion">
+            <div class="kpi-label">Pendientes de aprobacion</div>
+            <div class="kpi-value" id="personasPendientes">0</div>
+            <div class="kpi-sub">Esperando al Jefe</div>
+          </section>
+          <section class="card kpi-card kpi-mini surface card-ok">
+            <div class="kpi-label">Saldo compensable (planta)</div>
+            <div class="kpi-value" id="personasSaldoTotal">0,0 hs</div>
+            <div class="kpi-sub">Generadas menos compensadas</div>
+          </section>
+          <section class="card kpi-card kpi-mini surface card-neutral">
+            <div class="kpi-label">En liquidacion (planta)</div>
+            <div class="kpi-value" id="personasLiqTotal">0,0 hs</div>
+            <div class="kpi-sub">Sab/dom + feriados desde <span class="vig-fecha">01/08/2026</span></div>
+          </section>
+        </div>
+
+        <section class="card surface">
+          <div class="section-title"><h2 class="h3">Supervisores</h2></div>
+          <p class="tabla-scroll-hint">Deslizá la tabla para ver el saldo compensable &rarr;</p>
+          <div class="tabla-wrap">
+            <table class="tabla">
+              <thead>
+                <tr>
+                  <th>Supervisor</th>
+                  <th class="num-col">HE del mes</th>
+                  <th class="num-col">Liq. sab/dom</th>
+                  <th class="num-col">Liq. feriado</th>
+                  <th class="num-col">Compensadas</th>
+                  <th class="num-col">Saldo compensable</th>
+                </tr>
+              </thead>
+              <tbody id="personasTablaBody"><!-- filas via JS --></tbody>
+            </table>
+          </div>
         </section>
       </div>
 
-      <section class="card surface">
-        <div class="section-title"><h2 class="h3">Supervisores</h2></div>
-        <p class="tabla-scroll-hint">Deslizá la tabla para ver el saldo compensable &rarr;</p>
-        <div class="tabla-wrap">
-          <table class="tabla">
-            <thead>
-              <tr>
-                <th>Supervisor</th>
-                <th class="num-col">HE del mes</th>
-                <th class="num-col">Liq. sab/dom</th>
-                <th class="num-col">Liq. feriado</th>
-                <th class="num-col">Compensadas</th>
-                <th class="num-col">Saldo compensable</th>
-              </tr>
-            </thead>
-            <tbody id="personasTablaBody"><!-- filas via JS --></tbody>
-          </table>
-        </div>
-      </section>
-
-      <section class="card surface" id="conPersonasCard" aria-labelledby="conPersonasHeading">
+      <section class="card surface" id="conPersonasCard" data-panel="consulta" aria-labelledby="conPersonasHeading">
         <div class="section-title"><h2 class="h3" id="conPersonasHeading">Consulta</h2></div>
         <div class="filtros-grid">
           <label class="filtro-full">Supervisor
@@ -309,6 +368,8 @@
               <option value="Aprobada">Aprobada</option>
               <option value="Pendiente">Pendiente</option>
               <option value="Rechazada">Rechazada</option>
+              <option value="Anulada">Anulada</option>
+              <option value="Retirada">Retirada</option>
             </select>
           </label>
           <label>Mes
@@ -344,7 +405,7 @@
         <ul class="solicitudes-list con-lista" id="conPersonasLista"><!-- via JS --></ul>
       </section>
 
-      <section class="card cal-card surface" aria-labelledby="calPersonasHeading">
+      <section class="card cal-card surface" data-panel="consulta" aria-labelledby="calPersonasHeading">
         <div class="section-title"><h2 class="h3" id="calPersonasHeading">Calendario</h2></div>
         <div class="cal-header">
           <button type="button" class="cal-nav-btn" id="calPersonasPrev" aria-label="Mes anterior">
@@ -545,6 +606,122 @@
           <p class="caption mail-ayuda">"Abrir en Gmail" abre un mail nuevo con destinatarios, asunto y texto listos. Lo revisás, cambiás lo que quieras y lo mandás vos.</p>
           <span class="visually-hidden" aria-live="polite" id="mailCanjeStatus"></span>
         </section>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== MODAL: EDITAR SOLICITUD O CANJE ==================== -->
+  <div class="modal-overlay" id="overlayEditar" aria-hidden="true">
+    <div class="modal surface" role="dialog" aria-modal="true" aria-labelledby="editTitulo">
+      <div class="modal-header">
+        <div>
+          <div class="eyebrow" id="editEyebrow">Editar</div>
+          <h2 class="h3" id="editTitulo">-</h2>
+          <p class="caption" id="editSub"></p>
+        </div>
+        <button type="button" class="modal-close" data-close aria-label="Cerrar">
+          <svg class="icon icon-16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+      </div>
+      <div class="edit-chips" id="editChips"></div>
+      <div class="cal-skeleton" id="editCargando" hidden>
+        <div class="sk-line" style="width:55%;height:11px"></div>
+        <div class="sk-line" style="width:100%;height:90px"></div>
+        <div class="sk-line" style="width:100%;height:60px"></div>
+      </div>
+      <div class="error-msg" id="editErrorCarga" role="alert" hidden></div>
+
+      <form id="formEditar" class="modal-body" novalidate hidden>
+        <!-- Paso 1: decision y datos -->
+        <div class="edit-paso" id="editPaso1">
+          <fieldset class="tipo-fieldset" id="editDecision">
+            <legend>Decisión</legend>
+            <div class="estado-grid">
+              <label class="radio"><input type="radio" name="editEstado" value="Aprobada"> Aprobada</label>
+              <label class="radio"><input type="radio" name="editEstado" value="Rechazada"> Rechazada</label>
+              <label class="radio"><input type="radio" name="editEstado" value="Pendiente"> Pendiente</label>
+              <label class="radio"><input type="radio" name="editEstado" value="Anulada"> Anulada</label>
+            </div>
+            <p class="caption" id="editDecisionAyuda"></p>
+          </fieldset>
+
+          <label>Fecha
+            <input type="date" id="editFecha" required>
+          </label>
+
+          <div class="edit-paso" id="editDatosHE">
+            <div class="editar-grid-2">
+              <label>Horas
+                <input type="number" id="editHoras" step="0.5" min="0.5" max="24" inputmode="decimal">
+              </label>
+              <label>Línea
+                <select id="editLinea"></select>
+              </label>
+            </div>
+            <label>Motivo
+              <textarea id="editMotivo" rows="3"></textarea>
+            </label>
+          </div>
+
+          <fieldset class="tipo-fieldset" id="editDatosCP">
+            <legend>Tipo</legend>
+            <label class="radio">
+              <input type="radio" name="editTipo" value="completo"> Día completo <span class="muted-text">(8 hs)</span>
+            </label>
+            <label class="radio">
+              <input type="radio" name="editTipo" value="medio"> Medio día <span class="muted-text">(4 hs)</span>
+            </label>
+            <label class="radio">
+              <input type="radio" name="editTipo" value="personalizado"> Otra cantidad de horas
+            </label>
+            <div class="horas-sueltas" id="editHorasSueltasFila" hidden>
+              <label for="editHorasSueltas">Cuántas horas</label>
+              <input type="number" id="editHorasSueltas" min="1" step="1" inputmode="numeric" placeholder="Ej: 3">
+              <span class="muted-text">horas enteras</span>
+            </div>
+            <div class="calc-box" id="editCalcBox" hidden>
+              <div class="calc-row"><span>Horas a descontar</span><b class="num" id="editHorasNuevas">0,0 hs</b></div>
+              <div class="calc-row"><span>Saldo compensable</span><b class="num" id="editSaldoActual">0,0 hs</b></div>
+              <div class="calc-row calc-result"><span>Saldo resultante</span><b class="num" id="editSaldoResultante">0,0 hs</b></div>
+            </div>
+          </fieldset>
+
+          <label>
+            <span id="editMotivoCambioLabel">Motivo del cambio (obligatorio)</span>
+            <textarea id="editMotivoCambio" rows="3" maxlength="500" placeholder="Ej: se cargó dos veces"></textarea>
+          </label>
+
+          <details class="historial" id="editHistorial" hidden>
+            <summary>Historial de esta solicitud</summary>
+            <ul class="actividad-lista" id="editHistorialLista"></ul>
+          </details>
+        </div>
+
+        <!-- Paso 2: revisar el cambio (todo lo calcula el servidor) -->
+        <div class="edit-paso" id="editPaso2" hidden>
+          <div class="eyebrow">Revisá el cambio</div>
+          <div class="calc-box"><dl class="cambios-lista" id="editCambios"></dl></div>
+          <div class="calc-box" id="editSaldos"></div>
+          <div class="edit-paso" id="editAvisos"></div>
+          <label class="chk" id="editDescubiertoFila" hidden>
+            <input type="checkbox" id="editAceptarDescubierto">
+            <span>Confirmo dejar el saldo en descubierto</span>
+          </label>
+          <p class="caption" id="editAvisoMail"></p>
+        </div>
+
+        <p class="error-msg" id="editError" role="alert" hidden>
+          <svg class="icon icon-16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+          <span id="editErrorTexto">Error.</span>
+        </p>
+      </form>
+
+      <div class="modal-footer">
+        <button type="button" class="btn btn-ghost" id="editBtnCancelar" data-close>Cancelar</button>
+        <button type="button" class="btn btn-ghost" id="editBtnVolver" hidden>Volver</button>
+        <button type="submit" class="btn btn-primary" form="formEditar" id="editBtnRevisar" disabled>Revisar cambio</button>
+        <button type="submit" class="btn btn-primary" form="formEditar" id="editBtnGuardar" hidden>Guardar cambios</button>
+        <button type="button" class="btn btn-primary" id="editBtnConfirmar" hidden>Confirmar cambio</button>
       </div>
     </div>
   </div>

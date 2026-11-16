@@ -12,7 +12,15 @@
     calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/>',
     alertTriangle: '<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
     mail: '<rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>',
-    banknote: '<rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2"/><path d="M6 12h.01M18 12h.01"/>'
+    banknote: '<rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2"/><path d="M6 12h.01M18 12h.01"/>',
+    home: '<path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/>',
+    search: '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
+    settings: '<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>',
+    ban: '<circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/>',
+    undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"/>',
+    pencil: '<path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/>',
+    users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+    userPlus: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6"/><path d="M22 11h-6"/>'
   };
   function svgIcon(nombre, clase) {
     return '<svg class="icon ' + (clase || '') + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
@@ -281,11 +289,16 @@
   var errorTitulo = document.getElementById('errorTitulo');
   var errorMensaje = document.getElementById('errorMensaje');
   var rolePill = document.getElementById('rolePill');
+  var tabBar = document.getElementById('tabBar');
+  var avisoGlobal = document.getElementById('avisoGlobal');
+  var avisoGlobalTexto = document.getElementById('avisoGlobalTexto');
   var TODAS_LAS_VISTAS = ['viewSupervisor', 'viewJefe', 'viewPersonas'];
 
   function ocultarTodo() {
     viewCargando.hidden = true;
     viewError.hidden = true;
+    tabBar.hidden = true;
+    avisoGlobal.hidden = true;
     TODAS_LAS_VISTAS.forEach(function (id) {
       var el = document.getElementById(id);
       el.hidden = true;
@@ -322,6 +335,115 @@
   document.getElementById('btnAvisoOk').addEventListener('click', function () {
     try { localStorage.setItem(AVISO_LIQ_KEY, '1'); } catch (err) { /* modo privado, no critico */ }
     document.getElementById('avisoPolitica').hidden = true;
+  });
+
+  /* ==================== PESTAÑAS POR ROL ==================== */
+  // Jefe: Inicio / Consulta / Administracion. Personas: Inicio / Consulta.
+  // Supervisor: sin barra (nunca se llama a irATab: ve todo junto).
+  // Cada bloque de contenido lleva data-panel="inicio|consulta|admin"; la
+  // pestaña activa oculta los demas con la clase .fuera-de-tab. Esto NO usa el
+  // atributo hidden: ese lo usan las vistas por rol (mostrarVista) y mezclarlos
+  // haria aparecer la vista de otro rol al volver de una pestaña.
+  var TAB_BTNS = {
+    inicio: document.getElementById('tabBtnInicio'),
+    consulta: document.getElementById('tabBtnConsulta'),
+    admin: document.getElementById('tabBtnAdmin')
+  };
+  var tabs = { actual: 'inicio' };
+
+  function aplicarTab(nombre) {
+    tabs.actual = nombre;
+    var paneles = document.querySelectorAll('[data-panel]');
+    for (var i = 0; i < paneles.length; i++) {
+      paneles[i].classList.toggle('fuera-de-tab', paneles[i].getAttribute('data-panel') !== nombre);
+    }
+    Object.keys(TAB_BTNS).forEach(function (k) {
+      var activo = k === nombre;
+      TAB_BTNS[k].setAttribute('aria-selected', activo ? 'true' : 'false');
+      TAB_BTNS[k].setAttribute('tabindex', activo ? '0' : '-1');
+    });
+  }
+
+  // Se llama desde cargarEstado con lo que mando el servidor. Reaplica
+  // tabs.actual al final: cargarEstado oculta todo y vuelve a mostrar, y sin
+  // esto cada edicion devolveria al Jefe a Inicio.
+  function configurarTabs(data) {
+    var rol = data.yo.rol;
+    if (rol === 'Supervisor') {
+      tabBar.hidden = true;
+      var todos = document.querySelectorAll('[data-panel]');
+      for (var i = 0; i < todos.length; i++) todos[i].classList.remove('fuera-de-tab');
+      pintarAviso();
+      return;
+    }
+    // Los permisos salen de un flag del servidor, no del texto del rol.
+    var puedeAdmin = !!(data.permisos && data.permisos.administrar);
+    TAB_BTNS.admin.hidden = !puedeAdmin;
+    TAB_BTNS.inicio.setAttribute('aria-controls', rol === 'Jefe' ? 'jefeInicio' : 'personasInicio');
+    TAB_BTNS.consulta.setAttribute('aria-controls', rol === 'Jefe' ? 'conJefeCard' : 'conPersonasCard');
+
+    var nPend = rol === 'Jefe' ? (data.pendientes || []).length : 0;
+    var badge = document.getElementById('tabBadgePend');
+    badge.textContent = String(nPend);
+    badge.hidden = nPend === 0;
+    TAB_BTNS.inicio.setAttribute('aria-label', nPend > 0 ? 'Inicio, ' + nPend + (nPend === 1 ? ' pendiente' : ' pendientes') : 'Inicio');
+
+    if (tabs.actual === 'admin' && !puedeAdmin) tabs.actual = 'inicio';
+    tabBar.hidden = false;
+    aplicarTab(tabs.actual);
+    pintarAviso();
+  }
+
+  function irATab(nombre) {
+    if (!TAB_BTNS[nombre] || TAB_BTNS[nombre].hidden) return;
+    aplicarTab(nombre);
+    if (nombre === 'admin' && typeof admin !== 'undefined' && admin && !admin.actividadCargada) admin.cargarActividad();
+    try { window.scrollTo(0, 0); } catch (err) { /* no critico */ }
+  }
+
+  tabBar.addEventListener('click', function (ev) {
+    var b = ev.target && ev.target.closest ? ev.target.closest('[data-tab]') : null;
+    if (b) irATab(b.getAttribute('data-tab'));
+  });
+  // Flechas izquierda/derecha, Inicio y Fin (patron de pestañas con tabindex itinerante).
+  tabBar.addEventListener('keydown', function (ev) {
+    if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].indexOf(ev.key) === -1) return;
+    var visibles = Object.keys(TAB_BTNS).map(function (k) { return TAB_BTNS[k]; })
+      .filter(function (b) { return !b.hidden; });
+    if (!visibles.length) return;
+    var i = visibles.indexOf(document.activeElement);
+    if (i < 0) i = visibles.indexOf(TAB_BTNS[tabs.actual]);
+    if (ev.key === 'ArrowRight') i = (i + 1) % visibles.length;
+    else if (ev.key === 'ArrowLeft') i = (i - 1 + visibles.length) % visibles.length;
+    else if (ev.key === 'Home') i = 0;
+    else i = visibles.length - 1;
+    ev.preventDefault();
+    irATab(visibles[i].getAttribute('data-tab'));
+    visibles[i].focus();
+  });
+  // Cualquier elemento con data-ir-tab lleva a esa pestaña ("Ir a Consulta").
+  document.addEventListener('click', function (ev) {
+    var t = ev.target && ev.target.closest ? ev.target.closest('[data-ir-tab]') : null;
+    if (t) irATab(t.getAttribute('data-ir-tab'));
+  });
+
+  /* ==================== AVISO GLOBAL ==================== */
+  // Un aviso (por ejemplo "el cambio se guardo pero el mail no salio") tiene
+  // que sobrevivir a la recarga que sigue a guardar (cargarEstado oculta todo):
+  // el texto queda guardado y se vuelve a pintar hasta que se toca "Entendido".
+  var aviso = { texto: '' };
+  function pintarAviso() {
+    if (!aviso.texto) { avisoGlobal.hidden = true; return; }
+    avisoGlobalTexto.textContent = aviso.texto;
+    avisoGlobal.hidden = false;
+  }
+  function mostrarAviso(texto) {
+    aviso.texto = String(texto || '');
+    pintarAviso();
+  }
+  document.getElementById('avisoGlobalCerrar').addEventListener('click', function () {
+    aviso.texto = '';
+    pintarAviso();
   });
 
   /* ==================== ESTADO GLOBAL EN MEMORIA (lo ultimo que mando el servidor) ==================== */
@@ -364,17 +486,29 @@
         renderSupervisor(data);
         calSupervisor.recargarActual();
       }
+      configurarTabs(data);
     } catch (err) {
       mostrarError(err);
     }
   }
 
   /* ==================== RENDER: SUPERVISOR ==================== */
+  // El texto que devuelve ya viene listo para insertar con innerHTML. Un estado
+  // desconocido NUNCA se muestra como Pendiente (seria mentirle al Jefe sobre
+  // si algo espera su decision): sale como "sin efecto" con el texto escapado.
   function chipInfo(estado) {
     var e = String(estado || '').toLowerCase();
     if (e === 'aprobada') return { clase: 'chip-aprobada', texto: 'Aprobada', icono: 'check' };
     if (e === 'rechazada') return { clase: 'chip-rechazada', texto: 'Rechazada', icono: 'x' };
-    return { clase: 'chip-pendiente', texto: 'Pendiente', icono: 'clock' };
+    if (e === 'pendiente') return { clase: 'chip-pendiente', texto: 'Pendiente', icono: 'clock' };
+    if (e === 'anulada') return { clase: 'chip-sin-efecto', texto: 'Anulada', icono: 'ban' };
+    if (e === 'retirada') return { clase: 'chip-sin-efecto', texto: 'Retirada', icono: 'undo' };
+    return { clase: 'chip-sin-efecto', texto: esc(estado || 'Sin estado'), icono: 'alertTriangle' };
+  }
+
+  // Anulada y Retirada no suman: el titulo de la fila va tachado.
+  function esSinEfecto(estado) {
+    return estado === 'Anulada' || estado === 'Retirada';
   }
 
   function estadoVacio(mensaje, submensaje) {
@@ -443,7 +577,7 @@
       li.innerHTML =
         '<div class="sol-main">' +
           '<span class="sol-tipo">' + esc(s.tipo === 'CP' ? 'CJ' : s.tipo) + '</span>' +
-          '<div class="sol-info"><strong>' + esc(s.titulo) + '</strong><span class="sol-meta">' + esc(s.fecha) + (s.linea && s.linea !== '-' ? ' · ' + esc(s.linea) : '') + '</span></div>' +
+          '<div class="sol-info"><strong' + (esSinEfecto(s.estado) ? ' class="tachado"' : '') + '>' + esc(s.titulo) + '</strong><span class="sol-meta">' + esc(s.fecha) + (s.linea && s.linea !== '-' ? ' · ' + esc(s.linea) : '') + '</span></div>' +
         '</div>' +
         '<span class="chip ' + info.clase + '">' + svgIcon(info.icono, 'icon-14') + info.texto + '</span>' +
         '<span class="sol-chevron">' + svgIcon('chevronRight', 'icon-16') + '</span>';
@@ -635,6 +769,8 @@
     // Cerrar el mail de canje mientras carga invalida esa respuesta: si no,
     // llegaria despues y llenaria un modal ya cerrado.
     if (overlay.id === 'overlayMailCanje' && typeof mailCanje !== 'undefined' && mailCanje) mailCanje.pedido++;
+    // Igual con el modal de edicion: una respuesta tardia no debe llenar un modal cerrado o reabierto.
+    if (overlay.id === 'overlayEditar' && typeof edicion !== 'undefined' && edicion) edicion.pedido++;
     overlay.classList.remove('open');
     overlay.setAttribute('aria-hidden', 'true');
     if (overlay._trapHandler) {
@@ -1527,13 +1663,17 @@
     // la protagonista: es el comportamiento correcto, no un caso especial.
     function renderResumen(lista) {
       var aprobadas = 0, pendientes = 0, rechazadas = 0, rechCount = 0;
+      var anuladas = 0, anulN = 0, retiradas = 0, retN = 0;
       var liq = 0, comp = 0;
       var cjAprob = 0, cjAprobN = 0, cjPend = 0, cjPendN = 0, cjRech = 0, cjRechN = 0;
+      var cjAnul = 0, cjAnulN = 0, cjRet = 0, cjRetN = 0;
       lista.forEach(function (f) {
         if (f.mov === 'CP') {
           if (f.estado === 'Aprobada') { cjAprob += f.horas; cjAprobN++; }
           else if (f.estado === 'Pendiente') { cjPend += f.horas; cjPendN++; }
           else if (f.estado === 'Rechazada') { cjRech += f.horas; cjRechN++; }
+          else if (f.estado === 'Anulada') { cjAnul += f.horas; cjAnulN++; }
+          else if (f.estado === 'Retirada') { cjRet += f.horas; cjRetN++; }
           return;
         }
         if (f.estado === 'Aprobada') {
@@ -1542,6 +1682,8 @@
         }
         else if (f.estado === 'Pendiente') pendientes += f.horas;
         else if (f.estado === 'Rechazada') { rechazadas += f.horas; rechCount++; }
+        else if (f.estado === 'Anulada') { anuladas += f.horas; anulN++; }
+        else if (f.estado === 'Retirada') { retiradas += f.horas; retN++; }
       });
       var chips = '';
       if (pendientes > 0) {
@@ -1551,6 +1693,15 @@
       if (rechCount > 0) {
         chips += '<span class="chip chip-rechazada">' + svgIcon('x', 'icon-14') +
           rechCount + (rechCount === 1 ? ' rechazada' : ' rechazadas') + ' · ' + fmt(rechazadas) + ' hs (no suman)</span>';
+      }
+      // Anulada y Retirada no suman a nada: chips "sin efecto" (icono + texto + borde punteado).
+      if (anulN > 0) {
+        chips += '<span class="chip chip-sin-efecto">' + svgIcon('ban', 'icon-14') +
+          anulN + (anulN === 1 ? ' anulada' : ' anuladas') + ' · ' + fmt(anuladas) + ' hs (no suman)</span>';
+      }
+      if (retN > 0) {
+        chips += '<span class="chip chip-sin-efecto">' + svgIcon('undo', 'icon-14') +
+          retN + (retN === 1 ? ' retirada' : ' retiradas') + ' · ' + fmt(retiradas) + ' hs</span>';
       }
       // Una fila cuya fecha no se pudo interpretar queda fuera de cualquier
       // corte por mes o semana. Si no se avisara, el Jefe veria un total que
@@ -1593,6 +1744,14 @@
           if (cjRechN > 0) {
             cjChips += '<span class="chip chip-rechazada">' + svgIcon('x', 'icon-14') +
               cjRechN + (cjRechN === 1 ? ' canje rechazado' : ' canjes rechazados') + ' · ' + fmt(cjRech) + ' hs</span>';
+          }
+          if (cjAnulN > 0) {
+            cjChips += '<span class="chip chip-sin-efecto">' + svgIcon('ban', 'icon-14') +
+              cjAnulN + (cjAnulN === 1 ? ' canje anulado' : ' canjes anulados') + ' · ' + fmt(cjAnul) + ' hs</span>';
+          }
+          if (cjRetN > 0) {
+            cjChips += '<span class="chip chip-sin-efecto">' + svgIcon('undo', 'icon-14') +
+              cjRetN + (cjRetN === 1 ? ' canje retirado' : ' canjes retirados') + ' · ' + fmt(cjRet) + ' hs</span>';
           }
           canjeHTML = '<div class="con-resumen-canje' + (filtros.mov === 'CP' ? ' es-principal' : '') + '">' +
             '<div class="kpi-label">Canjes aprobados</div>' +
@@ -1678,35 +1837,46 @@
         var meta = [f.fechaTexto || '—'];
         if (f.fecha) meta.push('S' + isoSemana(f.fecha.anio, f.fecha.mes, f.fecha.dia).semana);
         meta.push(f.supervisor);
+        var tachado = esSinEfecto(f.estado) ? ' class="tachado"' : '';
+        // "Editar" solo si el servidor lo permite (f.editable): Jefe, y no si la saco el autor.
+        var btnEditar = f.editable
+          ? '<button type="button" class="btn btn-ghost btn-sm" data-accion="editar" data-id="' + esc(f.id) +
+            '" aria-label="' + esc('Editar ' + (f.mov === 'CP' ? 'canje' : 'horas extra') + ' de ' + f.supervisor + ' del ' + (f.fechaTexto || '')) + '">' +
+            svgIcon('pencil', 'icon-16') + 'Editar</button>'
+          : '';
         if (f.mov === 'CP') {
           // Solo el Jefe arma el mail, y solo de un canje aprobado.
           var conMail = f.estado === 'Aprobada' && estadoActual && estadoActual.yo && estadoActual.yo.rol === 'Jefe';
-          return '<li class="solicitud-item' + (conMail ? ' con-acciones' : '') + '" style="--i:' + i + '">' +
+          var btnMail = conMail
+            ? '<button type="button" class="btn btn-ghost btn-sm" data-accion="mail-canje" data-id="' +
+              esc(f.id) + '" aria-label="' + esc('Mail de canje ' + f.supervisor + ' ' + (f.fechaTexto || '')) + '">' +
+              svgIcon('mail', 'icon-16') + 'Mail de canje</button>'
+            : '';
+          var accionesCP = (btnMail || btnEditar) ? '<div class="sol-acciones">' + btnMail + btnEditar + '</div>' : '';
+          return '<li class="solicitud-item' + (accionesCP ? ' con-acciones' : '') + '" style="--i:' + i + '">' +
             '<div class="sol-main">' +
               '<span class="sol-tipo is-canje">Canje</span>' +
-              '<div class="sol-info"><strong>' + esc(fmt(f.horas) + ' hs · Canje · ' + (f.tipoCanje || '')) + '</strong>' +
+              '<div class="sol-info"><strong' + tachado + '>' + esc(fmt(f.horas) + ' hs · Canje · ' + (f.tipoCanje || '')) + '</strong>' +
               '<span class="sol-meta">' + esc(meta.join(' · ')) + '</span></div>' +
             '</div>' +
             '<span class="chip ' + info.clase + '">' + svgIcon(info.icono, 'icon-14') + info.texto + '</span>' +
-            (conMail
-              ? '<div class="sol-acciones"><button type="button" class="btn btn-ghost btn-sm" data-accion="mail-canje" data-id="' +
-                esc(f.id) + '" aria-label="' + esc('Mail de canje ' + f.supervisor + ' ' + (f.fechaTexto || '')) + '">' +
-                svgIcon('mail', 'icon-16') + 'Mail de canje</button></div>'
-              : '') +
+            accionesCP +
             '</li>';
         }
         if (f.tipoDia) meta.push(f.tipoDia);
         var chipLiqHTML = f.circuito === 'LIQ'
           ? '<span class="chip chip-liq">' + svgIcon('banknote', 'icon-14') + 'LIQ</span>'
           : '';
-        return '<li class="solicitud-item" style="--i:' + i + '">' +
+        var accionesHE = btnEditar ? '<div class="sol-acciones">' + btnEditar + '</div>' : '';
+        return '<li class="solicitud-item' + (accionesHE ? ' con-acciones' : '') + '" style="--i:' + i + '">' +
           '<div class="sol-main">' +
             '<span class="sol-tipo">' + esc(f.linea || '-') + '</span>' +
-            '<div class="sol-info"><strong>' + esc(fmt(f.horas) + ' hs · ' + (f.motivo || '')) + '</strong>' +
+            '<div class="sol-info"><strong' + tachado + '>' + esc(fmt(f.horas) + ' hs · ' + (f.motivo || '')) + '</strong>' +
             '<span class="sol-meta">' + esc(meta.join(' · ')) + '</span></div>' +
           '</div>' +
           chipLiqHTML +
           '<span class="chip ' + info.clase + '">' + svgIcon(info.icono, 'icon-14') + info.texto + '</span>' +
+          accionesHE +
           '</li>';
       }).join('');
     }
@@ -1769,7 +1939,9 @@
     // Delegacion: la lista se re-renderiza entera con cada filtro.
     elLista.addEventListener('click', function (ev) {
       var t = ev.target && ev.target.closest ? ev.target.closest('[data-accion="mail-canje"]') : null;
-      if (t) abrirMailCanje(t.getAttribute('data-id'));
+      if (t) { abrirMailCanje(t.getAttribute('data-id')); return; }
+      var e = ev.target && ev.target.closest ? ev.target.closest('[data-accion="editar"]') : null;
+      if (e) abrirEditar(e.getAttribute('data-id'), 'admin');
     });
     elLimpiar.addEventListener('click', function () {
       filtros.supervisor = 'Todos';
@@ -1808,14 +1980,15 @@
           datos.push({
             mov: 'HE', id: s.id, supervisor: s.supervisor, fecha: s.fecha, fechaTexto: s.fechaTexto,
             horas: s.horas, linea: s.linea, motivo: s.motivo, estado: s.estado,
-            tipoDia: s.tipoDia, circuito: s.circuito
+            tipoDia: s.tipoDia, circuito: s.circuito, editable: !!s.editable
           });
         });
         (data.canjes || []).forEach(function (c) {
           datos.push({
             mov: 'CP', id: c.id, supervisor: c.supervisor, fecha: c.fecha, fechaTexto: c.fechaTexto,
             horas: c.horas, linea: null, motivo: '', estado: c.estado,
-            tipoDia: null, circuito: null, tipoCanje: c.tipoCanje, comentario: c.comentario
+            tipoDia: null, circuito: null, tipoCanje: c.tipoCanje, comentario: c.comentario,
+            editable: !!c.editable
           });
         });
         poblarSupervisor();
@@ -1971,6 +2144,428 @@
     } finally {
       btnEnviarComp.disabled = false;
     }
+  });
+
+  /* ==================== MODAL: EDITAR SOLICITUD O CANJE (solo Jefe) ==================== */
+  // Dos pasos. Paso 1: decision + datos + motivo del cambio. "Revisar" llama a
+  // apiAdminEditar con confirmar:false y el SERVIDOR devuelve el resumen
+  // (cambios, saldos antes y despues, descubierto, mes anterior). Paso 2:
+  // se muestra ese resumen tal cual y "Confirmar" repite la llamada con
+  // confirmar:true. El cliente NO calcula plata: todo numero del paso 2 viene
+  // de `resumen`. El token no viaja nunca: la huella lo reemplaza.
+  var overlayEditar = document.getElementById('overlayEditar');
+  var formEditar = document.getElementById('formEditar');
+  var edEyebrow = document.getElementById('editEyebrow');
+  var edTitulo = document.getElementById('editTitulo');
+  var edSub = document.getElementById('editSub');
+  var edChips = document.getElementById('editChips');
+  var edCargando = document.getElementById('editCargando');
+  var edErrorCarga = document.getElementById('editErrorCarga');
+  var edPaso1 = document.getElementById('editPaso1');
+  var edPaso2 = document.getElementById('editPaso2');
+  var edAyuda = document.getElementById('editDecisionAyuda');
+  var edDatosHE = document.getElementById('editDatosHE');
+  var edDatosCP = document.getElementById('editDatosCP');
+  var edFecha = document.getElementById('editFecha');
+  var edHoras = document.getElementById('editHoras');
+  var edLinea = document.getElementById('editLinea');
+  var edMotivo = document.getElementById('editMotivo');
+  var edHorasSueltasFila = document.getElementById('editHorasSueltasFila');
+  var edHorasSueltas = document.getElementById('editHorasSueltas');
+  var edMotivoCambio = document.getElementById('editMotivoCambio');
+  var edHistorial = document.getElementById('editHistorial');
+  var edHistorialLista = document.getElementById('editHistorialLista');
+  var edErrorEl = document.getElementById('editError');
+  var edErrorTexto = document.getElementById('editErrorTexto');
+  var edCambios = document.getElementById('editCambios');
+  var edSaldos = document.getElementById('editSaldos');
+  var edAvisos = document.getElementById('editAvisos');
+  var edDescubiertoFila = document.getElementById('editDescubiertoFila');
+  var edAceptar = document.getElementById('editAceptarDescubierto');
+  var edAvisoMail = document.getElementById('editAvisoMail');
+  var edBtnCancelar = document.getElementById('editBtnCancelar');
+  var edBtnVolver = document.getElementById('editBtnVolver');
+  var edBtnRevisar = document.getElementById('editBtnRevisar');
+  var edBtnConfirmar = document.getElementById('editBtnConfirmar');
+
+  // pedido: se suma al cerrar (cerrarModal) y al abrir; una respuesta con otro
+  // pedido se descarta. enviando: hay una llamada de guardado en vuelo.
+  var edicion = { pedido: 0, modo: 'admin', paso: 1, detalle: null, payload: null, resumen: null, enviando: false };
+
+  var EDIT_AYUDA = {
+    HE: {
+      Aprobada: 'Aprobada: suma al saldo o a la liquidación, según el día.',
+      Rechazada: 'Rechazada: queda en el historial y no suma.',
+      Pendiente: 'Pendiente: vuelve a tu bandeja y te llega un mail nuevo para aprobarla.',
+      Anulada: 'Anulada: queda en el historial y no suma. Se puede revertir.'
+    },
+    CP: {
+      Aprobada: 'Aprobada: descuenta del saldo compensable.',
+      Rechazada: 'Rechazada: queda en el historial y no descuenta.',
+      Pendiente: 'Pendiente: vuelve a tu bandeja y te llega un mail nuevo para aprobarlo.',
+      Anulada: 'Anulada: queda en el historial y no descuenta. Se puede revertir.'
+    }
+  };
+
+  function edValorRadio(nombre) {
+    var r = formEditar.querySelector('input[name="' + nombre + '"]:checked');
+    return r ? r.value : '';
+  }
+  function edMarcarRadio(nombre, valor) {
+    Array.prototype.forEach.call(formEditar.querySelectorAll('input[name="' + nombre + '"]'), function (r) {
+      r.checked = (r.value === valor);
+    });
+  }
+  function edError(msg) {
+    if (!msg) { edErrorEl.hidden = true; return; }
+    edErrorTexto.textContent = msg;
+    edErrorEl.hidden = false;
+  }
+  function edSetPaso(n) {
+    edicion.paso = n;
+    edPaso1.hidden = n !== 1;
+    edPaso2.hidden = n !== 2;
+    edBtnCancelar.hidden = n !== 1;
+    edBtnRevisar.hidden = n !== 1;
+    edBtnVolver.hidden = n !== 2;
+    edBtnConfirmar.hidden = n !== 2;
+    edError(null);
+  }
+  function edActualizarAyuda() {
+    var d = edicion.detalle;
+    var est = edValorRadio('editEstado');
+    var mapa = d ? EDIT_AYUDA[d.mov] : null;
+    edAyuda.textContent = (mapa && mapa[est]) || '';
+  }
+  // Fecha de hoy LOCAL, solo como ayuda del <input type="date">: el servidor valida.
+  function hoyLocalClave() {
+    var h = new Date();
+    function p2(n) { return (n < 10 ? '0' : '') + n; }
+    return h.getFullYear() + '-' + p2(h.getMonth() + 1) + '-' + p2(h.getDate());
+  }
+
+  async function abrirEditar(id, modo) {
+    var pedido = ++edicion.pedido;
+    edicion.modo = modo || 'admin';
+    edicion.detalle = null;
+    edicion.payload = null;
+    edicion.resumen = null;
+    edicion.enviando = false;
+    edEyebrow.textContent = 'Editar';
+    edTitulo.textContent = 'Cargando…';
+    edSub.textContent = '';
+    edChips.innerHTML = '';
+    formEditar.hidden = true;
+    edErrorCarga.hidden = true;
+    edCargando.hidden = false;
+    edSetPaso(1);
+    edBtnRevisar.disabled = true;
+    edBtnConfirmar.disabled = false;
+    edBtnVolver.disabled = false;
+    abrirModal(overlayEditar);
+    try {
+      var d = await llamarServidor('apiAdminDetalle', id);
+      if (pedido !== edicion.pedido) return; // se cerro o se abrio otra mientras tanto
+      edMostrar(d);
+    } catch (err) {
+      if (pedido !== edicion.pedido) return;
+      edCargando.hidden = true;
+      edErrorCarga.textContent = err.message || 'No se pudo abrir la solicitud.';
+      edErrorCarga.hidden = false;
+    }
+  }
+
+  function edMostrar(d) {
+    edicion.detalle = d;
+    var esHE = d.mov === 'HE';
+    edEyebrow.textContent = esHE ? 'Editar horas extra' : 'Editar canje';
+    edTitulo.textContent = d.supervisor + ' · ' + (d.fechaTexto || 'sin fecha');
+    edSub.textContent = d.id;
+
+    var info = chipInfo(d.estado);
+    var chips = '<span class="chip ' + info.clase + '">' + svgIcon(info.icono, 'icon-14') + info.texto + '</span>';
+    if (esHE && d.circuito === 'LIQ') chips += '<span class="chip chip-liq">' + svgIcon('banknote', 'icon-14') + 'LIQ</span>';
+    if (d.ultimaDecision && d.ultimaDecision.por) {
+      chips += '<span class="caption">Última decisión: ' + esc(d.ultimaDecision.por) +
+        (d.ultimaDecision.fecha ? ' · ' + esc(d.ultimaDecision.fecha) : '') + '</span>';
+    }
+    edChips.innerHTML = chips;
+
+    edMarcarRadio('editEstado', d.estado);
+    edFecha.value = d.fechaClave || '';
+    if (esHE) edFecha.max = hoyLocalClave(); else edFecha.removeAttribute('max');
+
+    edDatosHE.hidden = !esHE;
+    edDatosCP.hidden = esHE;
+    if (esHE) {
+      edHoras.value = d.horas;
+      edLinea.innerHTML = '';
+      if (!d.linea) edLinea.appendChild(opcion('', '(sin línea)'));
+      LINEAS_FIJAS.forEach(function (l) { edLinea.appendChild(opcion(l, l)); });
+      // Una linea cargada por el Form ("Envasado") se conserva como opcion actual.
+      if (d.linea && LINEAS_FIJAS.indexOf(d.linea) === -1) edLinea.appendChild(opcion(d.linea, d.linea + ' (actual)'));
+      edLinea.value = d.linea || '';
+      edMotivo.value = d.motivo || '';
+    } else {
+      edMarcarRadio('editTipo', d.tipoClave);
+      edHorasSueltas.value = d.horas;
+      edHorasSueltasFila.hidden = d.tipoClave !== 'personalizado';
+    }
+    edMotivoCambio.value = '';
+
+    var hist = d.historial || [];
+    edHistorial.hidden = !hist.length;
+    edHistorial.querySelector('summary').textContent = 'Historial de esta solicitud (' + hist.length + ')';
+    edHistorialLista.innerHTML = hist.map(function (h) {
+      return '<li class="actividad-item">' +
+        '<div class="actividad-top"><span class="actividad-titulo">' + esc(h.accionTexto) + '</span>' +
+        '<span class="caption num">' + esc(h.ts) + '</span></div>' +
+        (h.detalle ? '<div class="actividad-detalle">' + esc(h.detalle) + '</div>' : '') +
+        '<div class="actividad-pie"><span>por ' + esc(h.usuario) + '</span></div></li>';
+    }).join('');
+
+    edActualizarAyuda();
+    Array.prototype.forEach.call(formEditar.querySelectorAll('input, select, textarea'), function (el) {
+      el.disabled = !d.editable;
+    });
+    edSetPaso(1);
+    if (!d.editable) edError(d.motivoNoEditable || 'Esta solicitud no se puede modificar.');
+    edBtnRevisar.disabled = !d.editable;
+    edCargando.hidden = true;
+    formEditar.hidden = false;
+    var foco = formEditar.querySelector('input[name="editEstado"]:checked') || formEditar.querySelector('input');
+    if (foco) setTimeout(function () { foco.focus(); }, 40);
+  }
+
+  formEditar.addEventListener('change', function (ev) {
+    var t = ev.target;
+    if (!t || !t.name) return;
+    if (t.name === 'editEstado') edActualizarAyuda();
+    if (t.name === 'editTipo') {
+      var pers = edValorRadio('editTipo') === 'personalizado';
+      edHorasSueltasFila.hidden = !pers;
+      if (pers) edHorasSueltas.focus();
+    }
+  });
+
+  function edLeerPayload() {
+    var d = edicion.detalle;
+    var p = {
+      id: d.id, huella: d.huella, estado: edValorRadio('editEstado'),
+      fecha: edFecha.value, motivoCambio: edMotivoCambio.value
+    };
+    if (d.mov === 'HE') {
+      p.horas = edHoras.value;
+      p.linea = edLinea.value;
+      p.motivo = edMotivo.value;
+    } else {
+      p.tipo = edValorRadio('editTipo');
+      p.horas = edHorasSueltas.value;
+    }
+    return p;
+  }
+  function edConConfirmar(p, confirmar, aceptar) {
+    var o = {};
+    Object.keys(p).forEach(function (k) { o[k] = p[k]; });
+    o.confirmar = confirmar;
+    o.aceptarDescubierto = aceptar;
+    return o;
+  }
+
+  function edActualizarConfirmar() {
+    var r = edicion.resumen;
+    edBtnConfirmar.disabled = !!(r && r.descubierto && !edAceptar.checked);
+  }
+  edAceptar.addEventListener('change', edActualizarConfirmar);
+
+  // Paso 2: pinta lo que calculo el servidor, sin recalcular nada.
+  function edMostrarPaso2(res) {
+    edicion.resumen = res;
+    edCambios.innerHTML = res.cambios.map(function (c) {
+      return '<div class="cambio-fila"><dt>' + esc(c.campo) + '</dt><dd>' +
+        '<span class="cambio-antes">' + esc(c.antes) + '</span> ' +
+        '<span class="visually-hidden">pasa a</span>&rarr; ' + esc(c.despues) + '</dd></div>';
+    }).join('');
+
+    var filas = '';
+    if (res.liq.antes !== res.liq.despues) {
+      filas += '<div class="calc-row"><span>En liquidación</span><b class="num">' +
+        fmt(res.liq.antes) + ' hs &rarr; ' + fmt(res.liq.despues) + ' hs</b></div>';
+    }
+    filas += '<div class="calc-row calc-row-saldo"><span>Saldo compensable</span><b class="num">' +
+      fmt(res.saldo.antes) + ' hs &rarr; ' + fmt(res.saldo.despues) + ' hs</b></div>';
+    if (res.circuito) {
+      filas += '<div class="calc-row"><span>' + (res.circuito.despues === 'LIQ'
+        ? 'Pasa de compensable a liquidable (se paga)'
+        : 'Pasa de liquidable a compensable (suma al saldo)') + '</span></div>';
+    }
+    edSaldos.innerHTML = filas;
+    edSaldos.classList.toggle('invalid', !!res.descubierto);
+
+    var avisos = '';
+    if (res.mesAnterior) {
+      avisos += '<p class="con-aviso-sinfecha">' + svgIcon('alertTriangle', 'icon-14') +
+        '<span>Afecta ' + esc(res.mesAnterior) + ', que puede estar ya liquidado.</span></p>';
+    }
+    if (res.descubierto) {
+      avisos += '<p class="error-msg">' + svgIcon('alertTriangle', 'icon-16') +
+        '<span>El saldo queda en descubierto (' + fmt(res.saldo.despues) + ' hs).</span></p>';
+    }
+    edAvisos.innerHTML = avisos;
+
+    edDescubiertoFila.hidden = !res.descubierto;
+    edAceptar.checked = false;
+
+    var t = 'Se avisa por mail a ' + res.avisaA.supervisor +
+      (res.avisaA.personas > 0 ? ', con copia a Gerencia de Personas (' + res.avisaA.personas + ')' : '') + '.';
+    t += res.quedaPendiente
+      ? ' Vuelve a pendiente: te llega un mail nuevo para aprobarla; los links viejos dejan de funcionar.'
+      : ' Los links de los mails anteriores de esta solicitud dejan de funcionar.';
+    t += ' Motivo: “' + res.motivoCambio + '”.';
+    edAvisoMail.textContent = t;
+
+    edSetPaso(2);
+    edActualizarConfirmar();
+    var foco = res.descubierto ? edAceptar : edBtnVolver;
+    setTimeout(function () { foco.focus(); }, 40);
+  }
+
+  // Termina un guardado exitoso. Si el modal ya se cerro mientras la llamada
+  // estaba en vuelo, igual se refresca todo: el cambio YA esta escrito.
+  function edTerminar(r, pedido) {
+    if (pedido === edicion.pedido) cerrarModal(overlayEditar);
+    mostrarExito('Cambio guardado');
+    if (r.avisoMail) mostrarAviso(r.avisoMail);
+    cargarEstado();
+    if (admin.actividadCargada) admin.cargarActividad();
+  }
+
+  formEditar.addEventListener('submit', async function (ev) {
+    ev.preventDefault();
+    if (edicion.paso !== 1 || !edicion.detalle || !edicion.detalle.editable || edicion.enviando) return;
+    var d = edicion.detalle;
+    var p = edLeerPayload();
+    if (!p.estado) { edError('Elegí la decisión.'); return; }
+    if (!p.fecha && d.fechaClave) { edError('Elegí la fecha.'); return; }
+    if (!String(p.motivoCambio).trim()) { edError('Escribí el motivo del cambio.'); edMotivoCambio.focus(); return; }
+    edError(null);
+    var pedido = edicion.pedido;
+    edicion.enviando = true;
+    edBtnRevisar.disabled = true;
+    try {
+      var r = await llamarServidor('apiAdminEditar', edConConfirmar(p, false, false));
+      if (r && r.ok) { edTerminar(r, pedido); return; } // no deberia pasar sin confirmar
+      if (pedido !== edicion.pedido) return;
+      if (r && r.requiereConfirmacion) {
+        edicion.payload = p;
+        edMostrarPaso2(r.resumen);
+      }
+    } catch (err) {
+      if (pedido !== edicion.pedido) return;
+      edError(err.message || 'No se pudo revisar el cambio.');
+    } finally {
+      if (pedido === edicion.pedido) {
+        edicion.enviando = false;
+        edBtnRevisar.disabled = false;
+      }
+    }
+  });
+
+  edBtnVolver.addEventListener('click', function () {
+    if (edicion.enviando) return;
+    edSetPaso(1);
+  });
+
+  edBtnConfirmar.addEventListener('click', async function () {
+    if (edicion.paso !== 2 || !edicion.payload || edicion.enviando) return;
+    var pedido = edicion.pedido;
+    edicion.enviando = true;
+    edBtnConfirmar.disabled = true;
+    edBtnVolver.disabled = true;
+    edError(null);
+    try {
+      var r = await llamarServidor('apiAdminEditar', edConConfirmar(edicion.payload, true, edAceptar.checked));
+      if (r && r.ok) { edTerminar(r, pedido); return; }
+      if (pedido !== edicion.pedido) return;
+      if (r && r.requiereConfirmacion) {
+        edMostrarPaso2(r.resumen);
+        edError('El resultado cambió: revisalo de nuevo antes de confirmar.');
+      }
+    } catch (err) {
+      if (pedido !== edicion.pedido) return;
+      edError(err.message || 'No se pudo guardar el cambio.');
+    } finally {
+      if (pedido === edicion.pedido) {
+        edicion.enviando = false;
+        edBtnVolver.disabled = false;
+        edActualizarConfirmar();
+      }
+    }
+  });
+
+  /* ==================== ADMINISTRACION: ULTIMOS CAMBIOS (solo Jefe) ==================== */
+  var admLista = document.getElementById('adminActividadLista');
+  var admRecargar = document.getElementById('adminActividadRecargar');
+
+  // Siempre ícono + texto: el estado nunca va solo por color.
+  function chipAccion(accion) {
+    if (accion === 'ANULADA') return { clase: 'chip-sin-efecto', icono: 'ban' };
+    if (accion === 'RETIRADA') return { clase: 'chip-sin-efecto', icono: 'undo' };
+    if (accion === 'VUELTA_A_PENDIENTE') return { clase: 'chip-pendiente', icono: 'clock' };
+    if (accion === 'ERROR_MAIL' || accion === 'EDITADA_SALDO_NEGATIVO') return { clase: 'chip-rechazada', icono: 'alertTriangle' };
+    return { clase: 'chip-liq', icono: 'pencil' };
+  }
+
+  function renderActividad(items) {
+    if (!items || !items.length) {
+      admLista.innerHTML = estadoVacio('Todavía no hay cambios', 'Cuando edites o anules algo, aparece acá.');
+      return;
+    }
+    admLista.innerHTML = items.map(function (it) {
+      var ch = chipAccion(it.accion);
+      var ref = it.ref;
+      var titulo = ref
+        ? ref.supervisor + ' · ' + (ref.mov === 'CP' ? 'Canje' : 'HE') + ' · ' + (ref.fechaTexto || '—') + ' · ' + fmtCorto(ref.horas) + ' hs'
+        : it.id;
+      var btn = (it.editable && ref)
+        ? '<button type="button" class="btn btn-ghost btn-sm" data-accion="editar" data-id="' + esc(it.id) +
+          '" aria-label="' + esc('Editar ' + (ref.mov === 'CP' ? 'canje' : 'horas extra') + ' de ' + ref.supervisor + ' del ' + (ref.fechaTexto || '')) + '">' +
+          svgIcon('pencil', 'icon-16') + 'Editar</button>'
+        : '';
+      return '<li class="actividad-item">' +
+        '<div class="actividad-top"><span class="chip ' + ch.clase + '">' + svgIcon(ch.icono, 'icon-14') + esc(it.accionTexto) + '</span>' +
+        '<span class="caption num">' + esc(it.ts) + '</span></div>' +
+        '<div class="actividad-titulo">' + esc(titulo) + '</div>' +
+        (it.detalle ? '<div class="actividad-detalle">' + esc(it.detalle) + '</div>' : '') +
+        '<div class="actividad-pie"><span>por ' + esc(it.usuario) + '</span>' + btn + '</div>' +
+        '</li>';
+    }).join('');
+  }
+
+  async function cargarActividad() {
+    var pedido = ++admin.pedido;
+    admRecargar.disabled = true;
+    admLista.innerHTML = '<li>' + calSkeletonHTML() + '</li>';
+    try {
+      var r = await llamarServidor('apiAdminActividad');
+      if (pedido !== admin.pedido) return;
+      admin.actividadCargada = true;
+      renderActividad(r.items);
+    } catch (err) {
+      if (pedido !== admin.pedido) return;
+      admLista.innerHTML = '<li class="estado-vacio">' + svgIcon('alertTriangle', 'icon-32') +
+        '<strong>No pudimos cargar los cambios</strong><span>' +
+        esc(err.message || 'No se pudo conectar con el servidor.') + '</span></li>';
+    } finally {
+      if (pedido === admin.pedido) admRecargar.disabled = false;
+    }
+  }
+
+  var admin = { actividadCargada: false, pedido: 0, cargarActividad: cargarActividad };
+  admRecargar.addEventListener('click', cargarActividad);
+  admLista.addEventListener('click', function (ev) {
+    var t = ev.target && ev.target.closest ? ev.target.closest('[data-accion="editar"]') : null;
+    if (t) abrirEditar(t.getAttribute('data-id'), 'admin');
   });
 
   /* ==================== INIT ==================== */

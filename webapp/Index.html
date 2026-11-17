@@ -189,7 +189,7 @@
     <section id="viewJefe" class="view" aria-labelledby="tituloJefe" hidden>
       <h1 id="tituloJefe" class="visually-hidden">Pendientes y saldos del equipo</h1>
 
-      <div class="jefe-grid" id="jefeInicio" data-panel="inicio">
+      <div class="jefe-grid" id="jefeInicio" data-panel="inicio" role="tabpanel" aria-labelledby="tabBtnInicio">
         <div>
           <div class="jefe-header-row">
             <div class="section-title"><h2 class="h3">Pendientes</h2><span class="badge-count" id="pendCount">0</span></div>
@@ -203,7 +203,7 @@
         </section>
       </div>
 
-      <section class="card surface" id="conJefeCard" data-panel="consulta" aria-labelledby="conJefeHeading">
+      <section class="card surface" id="conJefeCard" data-panel="consulta" role="tabpanel" aria-labelledby="conJefeHeading">
         <div class="section-title"><h2 class="h3" id="conJefeHeading">Consulta</h2></div>
         <div class="filtros-grid">
           <label class="filtro-full">Supervisor
@@ -270,7 +270,7 @@
       </section>
 
       <!-- ==================== ADMINISTRACION (solo Jefe) ==================== -->
-      <section id="viewAdmin" data-panel="admin" aria-labelledby="adminHeading">
+      <section id="viewAdmin" data-panel="admin" role="tabpanel" aria-labelledby="adminHeading">
         <h2 class="visually-hidden" id="adminHeading">Administración</h2>
 
         <!-- Segmentado Solicitudes y canjes / Personas: se muestra cuando exista la seccion Personas. -->
@@ -305,7 +305,7 @@
     <section id="viewPersonas" class="view" aria-labelledby="tituloPersonas" hidden>
       <h1 id="tituloPersonas" class="visually-hidden">Vista Gerencia de Personas</h1>
 
-      <div id="personasInicio" data-panel="inicio">
+      <div id="personasInicio" data-panel="inicio" role="tabpanel" aria-labelledby="tabBtnInicio">
         <div class="eyebrow" style="margin-bottom:4px">Gerencia de Personas</div>
         <div class="h2" style="margin-bottom:14px">Saldos de horas extra — Fraccionamiento</div>
 
@@ -353,7 +353,7 @@
         </section>
       </div>
 
-      <section class="card surface" id="conPersonasCard" data-panel="consulta" aria-labelledby="conPersonasHeading">
+      <section class="card surface" id="conPersonasCard" data-panel="consulta" role="tabpanel" aria-labelledby="conPersonasHeading">
         <div class="section-title"><h2 class="h3" id="conPersonasHeading">Consulta</h2></div>
         <div class="filtros-grid">
           <label class="filtro-full">Supervisor

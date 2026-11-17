@@ -842,7 +842,7 @@ function _crearHoraExtra(datos) {
   // pueda ver ni aprobar.
   const destinatarioJefe = jefeEmail();
 
-  sh.appendRow([id, new Date(), supervisor, email, fecha, horas, linea, motivo,
+  sh.appendRow([id, new Date(), _celdaSegura(supervisor), email, fecha, horas, _celdaSegura(linea), _celdaSegura(motivo),
                 'Pendiente', '', '', '', token]);
 
   _log(id, 'ALTA_HE', email, horasTexto + ' hs - ' + fechaTexto + ' [' + c.circuito + '/' + c.tipo + ']');
@@ -910,7 +910,9 @@ function _enviarMailPendienteHE(o) {
   } catch (err) {
     // La fila ya quedo guardada. Si el mail falla dejamos traza en Auditoria
     // en vez de perder la solicitud en silencio.
-    _log(o.id, 'ERROR_MAIL', o.email, 'No se pudo notificar al Jefe: ' + err.message);
+    // usuarioLog: quien disparo el envio (el Jefe cuando es un reenvio por
+    // edicion). Sin esto, Auditoria le atribuia la falla al supervisor.
+    _log(o.id, 'ERROR_MAIL', o.usuarioLog || o.email, 'No se pudo notificar al Jefe: ' + err.message);
     return false;
   }
 }
@@ -964,7 +966,7 @@ function _crearCompensacion(datos) {
   // Resolver el destinatario ANTES de escribir la fila (ver _crearHoraExtra).
   const destinatarioJefe = jefeEmail();
 
-  sh.appendRow([id, new Date(), supervisor, email, fecha, horas, tipo,
+  sh.appendRow([id, new Date(), _celdaSegura(supervisor), email, fecha, horas, _celdaSegura(tipo),
                 'Pendiente', '', '', '', token]);
 
   _log(id, 'ALTA_COMP', email, _fmtHoras(horas) + ' hs - ' + fechaTexto + (validacion.ok ? '' : ' [SALDO INSUFICIENTE]'));
@@ -1020,7 +1022,9 @@ function _enviarMailPendienteCP(o) {
     });
     return true;
   } catch (err) {
-    _log(o.id, 'ERROR_MAIL', o.email, 'No se pudo notificar al Jefe: ' + err.message);
+    // usuarioLog: quien disparo el envio (el Jefe cuando es un reenvio por
+    // edicion). Sin esto, Auditoria le atribuia la falla al supervisor.
+    _log(o.id, 'ERROR_MAIL', o.usuarioLog || o.email, 'No se pudo notificar al Jefe: ' + err.message);
     return false;
   }
 }
@@ -2377,7 +2381,12 @@ function apiConsulta() {
  * `fila` ({Email, Estado}) puede ser undefined (permiso general).
  */
 function _puedeAdministrar(yo, fila) {
-  return !!yo && yo.rol === 'Jefe';
+  if (!yo || yo.rol !== 'Jefe') return false;
+  // Decision del Jefe: lo PROPIO no se edita. Nadie corrige, re-aprueba ni
+  // sube sus propias horas o canjes desde el panel: el control cruzado queda
+  // para Personas o el futuro Administrador.
+  if (fila && _normEmail(fila.Email) === _normEmail(yo.email)) return false;
+  return true;
 }
 
 /**
@@ -2438,7 +2447,17 @@ function _verificarFila(ref) {
 
 /** Escribe UNA celda de la fila, por nombre de columna. */
 function _setCelda(ref, nombreCol, valor) {
-  ref.sh.getRange(ref.filaHoja, _idx(ref.enc, nombreCol) + 1).setValue(valor);
+  ref.sh.getRange(ref.filaHoja, _idx(ref.enc, nombreCol) + 1).setValue(_celdaSegura(valor));
+}
+
+/**
+ * Texto tipeado por personas que empieza con = + - o @ Sheets lo toma como
+ * formula: "=HYPERLINK(...)" quedaria vivo en la planilla y "-revisar" termina
+ * en #ERROR!. Con un apostrofe adelante queda como texto literal (el apostrofe
+ * no se ve en la celda). Numeros y fechas pasan sin tocar.
+ */
+function _celdaSegura(v) {
+  return (typeof v === 'string' && /^[=+\-@]/.test(v)) ? "'" + v : v;
 }
 
 /**
@@ -2636,7 +2655,9 @@ function apiAdminDetalle(id) {
   const ref = _buscarFila(id);
   const v = _valoresFila(ref);
   if (!_puedeAdministrar(yo, { Email: v.email, Estado: v.estado })) {
-    throw new Error('No tenes permiso sobre esta solicitud.');
+    throw new Error(_normEmail(v.email) === _normEmail(yo.email)
+      ? 'Es una solicitud tuya: lo propio no se puede editar desde el panel.'
+      : 'No tenes permiso sobre esta solicitud.');
   }
 
   const nombres = _mapaNombres();
@@ -2706,7 +2727,9 @@ function apiAdminEditar(payload) {
     const ref = _buscarFila(payload.id);
     const v = _valoresFila(ref);
     if (!_puedeAdministrar(yo, { Email: v.email, Estado: v.estado })) {
-      throw new Error('No tenes permiso sobre esta solicitud.');
+      throw new Error(_normEmail(v.email) === _normEmail(yo.email)
+      ? 'Es una solicitud tuya: lo propio no se puede editar desde el panel.'
+      : 'No tenes permiso sobre esta solicitud.');
     }
     if (v.estado === 'Retirada') throw new Error('La retiro el supervisor: no se puede modificar.');
     if (_huella(v, ref.esComp) !== String(payload.huella || '')) {
@@ -2758,11 +2781,22 @@ function apiAdminEditar(payload) {
       descubierto: descubierto,
       mesAnterior: mesAnterior,
       quedaPendiente: nuevoEstado === 'Pendiente',
-      avisaA: { supervisor: nombre, personas: pers ? pers.split(',').length : 0 },
+      avisaA: { supervisor: nombre, personas: pers ? pers.split(',').length : 0,
+                // Si el dueño no tiene correo real, la vista previa no promete un mail que no va a salir.
+                mailOk: !!v.email && !_esEmailPlaceholder(v.email) },
       motivoCambio: motivoCambio
     };
 
     if (!payload.confirmar) return { ok: false, requiereConfirmacion: true, resumen: resumen };
+    // El resumen que el Jefe aprobo tiene que seguir siendo cierto: si entre la
+    // vista previa y la confirmacion cambio otra fila del mismo supervisor, el
+    // saldo o la liquidacion "despues" dan otra cosa. No se guarda en silencio.
+    const difiere = function (visto, real) {
+      return visto !== undefined && visto !== null && Math.abs(Number(visto) - Number(real)) > 1e-9;
+    };
+    if (difiere(payload.saldoVisto, saldoDespues) || difiere(payload.liqVisto, liqDespues)) {
+      return { ok: false, requiereConfirmacion: true, resumen: resumen, cambioResumen: true };
+    }
     if (descubierto && !payload.aceptarDescubierto) {
       return { ok: false, requiereConfirmacion: true, resumen: resumen };
     }
@@ -2812,7 +2846,8 @@ function apiAdminEditar(payload) {
         _mailModificacion({
           to: v.email, cc: pers, id: ref.id, mov: resumen.mov, email: v.email, supervisor: nombre,
           fechaTexto: _fmtFecha(datos.fecha), estadoFinal: nuevoEstado, cambios: cambios,
-          motivoCambio: motivoCambio, mesAnterior: mesAnterior, esAnulacion: nuevoEstado === 'Anulada'
+          motivoCambio: motivoCambio, mesAnterior: mesAnterior, esAnulacion: nuevoEstado === 'Anulada',
+          fechaRaw: datos.fecha
         });
         mailEnviado = true;
       } catch (err) {
@@ -2835,7 +2870,8 @@ function apiAdminEditar(payload) {
         const o = {
           to: jefeEmail(), id: ref.id, token: nuevoToken, supervisor: nombre, email: v.email,
           fecha: datos.fecha, horas: datos.horas,
-          prefijoAsunto: estadoCambio ? '[VUELVE A PENDIENTE] ' : '[CORREGIDA] ', notaHtml: nota
+          prefijoAsunto: estadoCambio ? '[VUELVE A PENDIENTE] ' : '[CORREGIDA] ', notaHtml: nota,
+          usuarioLog: yo.email
         };
         if (ref.esComp) o.tipo = datos.tipo; else { o.linea = datos.linea; o.motivo = datos.motivo; }
         reenvioAprobacion = ref.esComp ? _enviarMailPendienteCP(o) : _enviarMailPendienteHE(o);
@@ -2864,6 +2900,25 @@ function apiAdminEditar(payload) {
  *          fechaTexto:string, estadoFinal:string, cambios:Array, motivoCambio:string,
  *          mesAnterior:(string|null), esAnulacion:boolean}} o
  */
+/**
+ * Cuando una edicion deja una hora extra Aprobada, el mail dice si se paga o
+ * suma al saldo, igual que el mail comun de aprobacion (_notificarResultado).
+ * Sin esto, aprobar desde el panel perdia ese dato.
+ */
+function _parrafoCircuitoAprobada(o) {
+  if (o.mov === 'CP' || o.estadoFinal !== 'Aprobada' || !o.fechaRaw) return '';
+  try {
+    const c = circuitoHE(o.fechaRaw);
+    if (c.circuito === 'LIQ') {
+      return '<p>Corresponde a ' + _escHtml(_tipoDiaTextoLower(c.tipo)) +
+        ': entra en <b>liquidacion</b> (se paga). No suma al saldo de compensacion.</p>';
+    }
+    return '<p>Suma al saldo de compensacion.</p>';
+  } catch (err) {
+    return '';
+  }
+}
+
 function _mailModificacion(o) {
   const esComp = o.mov === 'CP';
   const asunto = (esComp
@@ -2889,6 +2944,7 @@ function _mailModificacion(o) {
     '<p>Estado actual: <b>' + _escHtml(o.estadoFinal) + '</b>.' +
     (o.esAnulacion ? ' Queda sin efecto: no suma a tu saldo ni a la liquidacion.' : '') + '</p>' +
     '<p>Motivo: ' + _escHtml(o.motivoCambio) + '</p>' +
+    _parrafoCircuitoAprobada(o) +
     (o.mesAnterior
       ? '<p style="background:#B00020;color:#fff;font-weight:bold;padding:10px 14px;border-radius:4px">' +
         'Afecta ' + _escHtml(o.mesAnterior) + ', que puede estar ya liquidado.</p>'
@@ -3241,7 +3297,7 @@ function _html(msg, color) {
 
 function _log(id, accion, usuario, detalle) {
   SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SH.LOG)
-    .appendRow([new Date(), id, accion, usuario, detalle]);
+    .appendRow([new Date(), id, accion, usuario, _celdaSegura(detalle)]);
 }
 
 // ==================== WEBAPP PROPIA (futuro) ====================

@@ -2416,8 +2416,10 @@
     edDescubiertoFila.hidden = !res.descubierto;
     edAceptar.checked = false;
 
-    var t = 'Se avisa por mail a ' + res.avisaA.supervisor +
-      (res.avisaA.personas > 0 ? ', con copia a Gerencia de Personas (' + res.avisaA.personas + ')' : '') + '.';
+    var t = res.avisaA.mailOk === false
+      ? res.avisaA.supervisor + ' no tiene un correo real cargado: no le va a llegar el aviso por mail.'
+      : 'Se avisa por mail a ' + res.avisaA.supervisor +
+        (res.avisaA.personas > 0 ? ', con copia a Gerencia de Personas (' + res.avisaA.personas + ')' : '') + '.';
     t += res.quedaPendiente
       ? ' Vuelve a pendiente: te llega un mail nuevo para aprobarla; los links viejos dejan de funcionar.'
       : ' Los links de los mails anteriores de esta solicitud dejan de funcionar.';
@@ -2458,6 +2460,7 @@
       if (pedido !== edicion.pedido) return;
       if (r && r.requiereConfirmacion) {
         edicion.payload = p;
+        edicion.resumen = r.resumen;
         edMostrarPaso2(r.resumen);
       }
     } catch (err) {
@@ -2484,10 +2487,19 @@
     edBtnVolver.disabled = true;
     edError(null);
     try {
-      var r = await llamarServidor('apiAdminEditar', edConConfirmar(edicion.payload, true, edAceptar.checked));
+      // Manda los numeros que el Jefe vio: si al confirmar dan otra cosa (otra
+      // fila del mismo supervisor cambio en el medio), el servidor no guarda y
+      // devuelve el resumen nuevo.
+      var pc = edConConfirmar(edicion.payload, true, edAceptar.checked);
+      if (edicion.resumen) {
+        pc.saldoVisto = edicion.resumen.saldo.despues;
+        pc.liqVisto = edicion.resumen.liq.despues;
+      }
+      var r = await llamarServidor('apiAdminEditar', pc);
       if (r && r.ok) { edTerminar(r, pedido); return; }
       if (pedido !== edicion.pedido) return;
       if (r && r.requiereConfirmacion) {
+        edicion.resumen = r.resumen;
         edMostrarPaso2(r.resumen);
         edError('El resultado cambió: revisalo de nuevo antes de confirmar.');
       }
